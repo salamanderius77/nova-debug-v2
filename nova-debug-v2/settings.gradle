@@ -1,0 +1,12 @@
+// Nova Debug v2 - settings.gradle
+pluginManagement {
+    repositories {
+        maven {
+            name = "Fabric"
+            url = "https://maven.fabricmc.net/"
+        }
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = "nova-debug-v2"

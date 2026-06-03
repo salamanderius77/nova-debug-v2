@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-debug",
+  "version": "${version}",
+  "name": "Nova Debug v2",
+  "description": "Chunk-based underground activity analysis addon for Meteor Client.",
+  "authors": [
+    "Nova"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/nova-debug/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "meteor": [
+      "dev.nova.novadebug.NovaDebugAddon"
+    ]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric": "*",
+    "minecraft": "~1.21.1",
+    "meteor-client": "*"
+  }
+}
