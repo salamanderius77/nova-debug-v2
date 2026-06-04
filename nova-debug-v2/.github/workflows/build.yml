@@ -12,8 +12,8 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
+      - name: Download Gradle wrapper
+        run: gradle wrapper --gradle-version 8.8
       - name: Build
         run: ./gradlew build
       - name: Upload jar
