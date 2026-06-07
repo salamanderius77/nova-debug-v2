@@ -12,7 +12,6 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.MobSpawnerBlockEntity;
-import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.math.BlockPos;
@@ -31,11 +30,16 @@ public class GoofyDebug extends Module {
     private final SettingGroup sgGeneral  = settings.createGroup("General");
 
     // Spawner settings
-    private final Setting<Boolean>      detectSpawners = sgSpawner.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
-    private final Setting<SettingColor> spawnerFill    = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
-    private final Setting<SettingColor> spawnerLine    = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
-    private final Setting<RenderStyle>  spawnerStyle   = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean>      spawnerToast   = sgSpawner.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    private final Setting<Boolean>      detectSpawners      = sgSpawner.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
+    private final Setting<SettingColor> spawnerFill         = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
+    private final Setting<SettingColor> spawnerLine         = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
+    private final Setting<RenderStyle>  spawnerStyle        = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
+    private final Setting<Boolean>      spawnerToast        = sgSpawner.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    // Separate bedrock pillar toggle for spawners
+    private final Setting<Boolean>      spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder()
+        .name("bedrock-pillar")
+        .description("Extend spawner pillar from bedrock (-64) to sky (320). Enable when DonutSMP anti-cheat is off.")
+        .defaultValue(false).build());
 
     // Activity settings
     private final Setting<Boolean>      detectActivity = sgActivity.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
@@ -43,13 +47,19 @@ public class GoofyDebug extends Module {
     private final Setting<SettingColor> activityLine   = sgActivity.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(255, 0, 0, 200)).build());
     private final Setting<RenderStyle>  activityStyle  = sgActivity.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
     private final Setting<Boolean>      activityToast  = sgActivity.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    // Activity never gets bedrock pillar — intentionally omitted
 
     // Player settings
-    private final Setting<Boolean>      detectPlayers = sgPlayers.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
-    private final Setting<SettingColor> playerFill    = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
-    private final Setting<SettingColor> playerLine    = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
-    private final Setting<RenderStyle>  playerStyle   = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean>      playerToast   = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    private final Setting<Boolean>      detectPlayers      = sgPlayers.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
+    private final Setting<SettingColor> playerFill         = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
+    private final Setting<SettingColor> playerLine         = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
+    private final Setting<RenderStyle>  playerStyle        = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
+    private final Setting<Boolean>      playerToast        = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    // Separate bedrock pillar toggle for players
+    private final Setting<Boolean>      playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder()
+        .name("bedrock-pillar")
+        .description("Extend player pillar from bedrock (-64) to sky (320). Enable when DonutSMP anti-cheat is off.")
+        .defaultValue(false).build());
 
     // General settings
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
@@ -61,17 +71,10 @@ public class GoofyDebug extends Module {
         .description("How many chunks to scan per activation")
         .defaultValue(4).min(1).sliderMax(20).build());
 
-    // FIX 1: how far the player must move before spawner/activity highlights clear
     private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder()
         .name("clear-distance")
         .description("How many chunks you must move before spawner/activity highlights clear. 0 = never clear.")
         .defaultValue(26).min(0).sliderMax(32).build());
-
-    // FIX 2: extend pillars to bedrock-to-sky when anti-cheat is off
-    private final Setting<Boolean> bedrockPillars = sgGeneral.add(new BoolSetting.Builder()
-        .name("bedrock-pillars")
-        .description("Extend player and spawner pillars from bedrock (-64) to sky (320). Enable when DonutSMP anti-cheat is off.")
-        .defaultValue(false).build());
 
     // Internal state
     private enum ChunkType { PLAYER, SPAWNER, ACTIVITY }
@@ -80,10 +83,8 @@ public class GoofyDebug extends Module {
     private final Set<ChunkPos>                          notifiedChunks = Collections.synchronizedSet(new HashSet<>());
     private final List<ChunkPos>                         scanQueue      = new ArrayList<>();
     private int      scanIndex      = 0;
-    private int      tickCounter    = 0;
     private boolean  scanDone       = false;
     private ChunkPos lastPlayerChunk  = null;
-    // FIX 1: origin of the last scan — used to measure how far player has moved
     private ChunkPos scanOriginChunk  = null;
 
     public GoofyDebug() {
@@ -95,9 +96,8 @@ public class GoofyDebug extends Module {
         trackedChunks.clear();
         notifiedChunks.clear();
         scanQueue.clear();
-        scanIndex      = 0;
-        tickCounter    = 0;
-        scanDone       = false;
+        scanIndex        = 0;
+        scanDone         = false;
         lastPlayerChunk  = null;
         scanOriginChunk  = null;
         buildScanQueue();
@@ -118,8 +118,8 @@ public class GoofyDebug extends Module {
         scanIndex = 0;
         scanDone  = false;
         ChunkPos playerChunk = mc.player.getChunkPos();
-        lastPlayerChunk  = playerChunk;
-        scanOriginChunk  = playerChunk;
+        lastPlayerChunk = playerChunk;
+        scanOriginChunk = playerChunk;
         int radius = Math.min(renderDistance.get(), 32);
         List<ChunkPos> all = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
@@ -127,6 +127,7 @@ public class GoofyDebug extends Module {
                 all.add(new ChunkPos(playerChunk.x + dx, playerChunk.z + dz));
             }
         }
+        // Sort by closest first
         all.sort(Comparator.comparingInt(p ->
             Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
         int limit = chunksToScan.get();
@@ -143,7 +144,8 @@ public class GoofyDebug extends Module {
                 if (nbt.contains("SpawnData")) {
                     String entityId = nbt.getCompound("SpawnData").getCompound("entity").getString("id");
                     if (entityId.contains(":")) entityId = entityId.split(":")[1];
-                    if (!entityId.isEmpty()) return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
+                    if (!entityId.isEmpty())
+                        return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
                 }
             }
         } catch (Exception ignored) {}
@@ -155,7 +157,9 @@ public class GoofyDebug extends Module {
             if (mc.world == null || mc.player == null) return;
             if (!mc.world.isChunkLoaded(pos.x, pos.z)) return;
 
-            // Players
+            WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
+
+            // Players — check first, highest priority
             if (detectPlayers.get()) {
                 for (PlayerEntity p : mc.world.getPlayers()) {
                     if (p == mc.player) continue;
@@ -171,28 +175,34 @@ public class GoofyDebug extends Module {
                 }
             }
 
-            // Spawners
+            // Spawners — scan the ENTIRE chunk height (-64 to 320) to catch all spawners
             if (detectSpawners.get()) {
-                WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
                 BlockPos foundPos = null;
-                outer:
+                int spawnerCount  = 0;
+
                 for (int lx = 0; lx < 16; lx++) {
                     for (int lz = 0; lz < 16; lz++) {
-                        for (int y = -64; y < 64; y++) {
+                        // Full world height scan: -64 to 320
+                        for (int y = mc.world.getBottomY(); y < mc.world.getTopY(); y++) {
                             BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
                             if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
-                                foundPos = bp;
-                                break outer;
+                                if (foundPos == null) foundPos = bp;
+                                spawnerCount++;
                             }
                         }
                     }
                 }
+
                 if (foundPos != null) {
                     boolean isNew = !ChunkType.SPAWNER.equals(trackedChunks.get(pos));
                     trackedChunks.put(pos, ChunkType.SPAWNER);
                     if (isNew && spawnerToast.get() && !notifiedChunks.contains(pos)) {
                         String spawnerType = getSpawnerType(chunk, foundPos);
-                        info("§9[Nova Debug] " + spawnerType + " Spawner §ffound!");
+                        if (spawnerCount == 1) {
+                            info("§9[Nova Debug] §f" + spawnerType + " §9Spawner found!");
+                        } else {
+                            info("§9[Nova Debug] §f" + spawnerCount + " §9Spawners found! (first: §f" + spawnerType + "§9)");
+                        }
                         notifiedChunks.add(pos);
                     }
                     return;
@@ -250,9 +260,7 @@ public class GoofyDebug extends Module {
                 }
             }
 
-            // FIX 1: Only clear spawner/activity data when the player has moved
-            // further than clearDistance chunks from the scan origin.
-            // Moving 1 chunk no longer wipes highlights.
+            // Only clear spawner/activity data when player moves past clearDistance
             ChunkPos currentChunk = mc.player.getChunkPos();
             int cd = clearDistance.get();
             boolean movedPastClearDistance = scanOriginChunk != null && cd > 0 && (
@@ -291,8 +299,8 @@ public class GoofyDebug extends Module {
             double distSq  = (double) distBlocks * distBlocks;
 
             for (Map.Entry<ChunkPos, ChunkType> entry : trackedChunks.entrySet()) {
-                ChunkPos    pos  = entry.getKey();
-                ChunkType   type = entry.getValue();
+                ChunkPos  pos  = entry.getKey();
+                ChunkType type = entry.getValue();
 
                 double cx  = pos.getCenterX();
                 double cz  = pos.getCenterZ();
@@ -303,11 +311,31 @@ public class GoofyDebug extends Module {
                 Color       fill;
                 Color       line;
                 RenderStyle style;
+                int         yMin = -64;
+                int         yMax;
 
                 switch (type) {
-                    case SPAWNER  -> { fill = c(spawnerFill.get());  line = c(spawnerLine.get());  style = spawnerStyle.get(); }
-                    case ACTIVITY -> { fill = c(activityFill.get()); line = c(activityLine.get()); style = activityStyle.get(); }
-                    default       -> { fill = c(playerFill.get());   line = c(playerLine.get());   style = playerStyle.get(); }
+                    case SPAWNER -> {
+                        fill  = c(spawnerFill.get());
+                        line  = c(spawnerLine.get());
+                        style = spawnerStyle.get();
+                        // Spawner has its own bedrock pillar toggle
+                        yMax  = spawnerBedrockPillar.get() ? 320 : 64;
+                    }
+                    case PLAYER -> {
+                        fill  = c(playerFill.get());
+                        line  = c(playerLine.get());
+                        style = playerStyle.get();
+                        // Player has its own bedrock pillar toggle
+                        yMax  = playerBedrockPillar.get() ? 320 : 64;
+                    }
+                    default -> {
+                        // Activity — never bedrock pillar, always underground only
+                        fill  = c(activityFill.get());
+                        line  = c(activityLine.get());
+                        style = activityStyle.get();
+                        yMax  = 64;
+                    }
                 }
 
                 int x1 = pos.getStartX();
@@ -316,10 +344,6 @@ public class GoofyDebug extends Module {
                 int z2 = z1 + 16;
 
                 if (style == RenderStyle.Pillar) {
-                    // FIX 2: bedrockPillars ON = full bedrock (-64) to sky (320)
-                    //         bedrockPillars OFF = underground only (-64 to 64)
-                    int yMin = -64;
-                    int yMax = bedrockPillars.get() ? 320 : 64;
                     event.renderer.box(x1, yMin, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
                 } else {
                     event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
