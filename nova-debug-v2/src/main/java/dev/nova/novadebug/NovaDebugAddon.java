@@ -9,8 +9,11 @@ public class NovaDebugAddon extends MeteorAddon {
     public static final Category CATEGORY = new Category("Nova Debug");
     @Override
     public void onInitialize() {
-        Modules.get().registerCategory(CATEGORY);
         Modules.get().add(new GoofyDebug());
+    }
+    @Override
+    public void onRegisterCategories() {
+        Modules.registerCategory(CATEGORY);
     }
     @Override
     public String getPackage() { return "dev.nova.novadebug"; }
