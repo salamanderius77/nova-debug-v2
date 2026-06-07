@@ -194,15 +194,12 @@ public class GoofyDebug extends Module {
         try {
             BlockEntity be = chunk.getBlockEntity(spawnerPos);
             if (be instanceof MobSpawnerBlockEntity spawner) {
-                // Use toInitialChunkDataNbt which is stable across 1.21.x
-                NbtCompound nbt = new NbtCompound();
-                spawner.writeNbt(nbt, mc.world.getRegistryManager());
-                if (!nbt.contains("SpawnData", 10)) return "Unknown";
+                NbtCompound nbt = spawner.createNbt(mc.world.getRegistryManager());
+                if (nbt == null || !nbt.contains("SpawnData", 10)) return "Unknown";
                 NbtCompound spawnData = (NbtCompound) nbt.get("SpawnData");
                 if (spawnData == null || !spawnData.contains("entity", 10)) return "Unknown";
                 NbtCompound entity = (NbtCompound) spawnData.get("entity");
                 if (entity == null || !entity.contains("id", 8)) return "Unknown";
-                // type 8 = NbtString, getString(key) with type check avoids the Optional issue
                 String entityId = entity.get("id").asString();
                 if (entityId == null || entityId.isEmpty()) return "Unknown";
                 if (entityId.contains(":")) entityId = entityId.split(":")[1];
