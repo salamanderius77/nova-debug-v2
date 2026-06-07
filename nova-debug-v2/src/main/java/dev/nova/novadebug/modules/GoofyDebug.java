@@ -195,17 +195,16 @@ public class GoofyDebug extends Module {
             BlockEntity be = chunk.getBlockEntity(spawnerPos);
             if (be instanceof MobSpawnerBlockEntity spawner) {
                 NbtCompound nbt = spawner.createNbt(mc.world.getRegistryManager());
-                if (nbt != null && nbt.contains("SpawnData")) {
-                    NbtCompound spawnData = nbt.getCompound("SpawnData");
-                    if (spawnData != null && spawnData.contains("entity")) {
-                        NbtCompound entity = spawnData.getCompound("entity");
-                        String entityId = entity != null ? entity.getString("id") : "";
-                        if (entityId != null && entityId.contains(":"))
-                            entityId = entityId.split(":")[1];
-                        if (entityId != null && !entityId.isEmpty())
-                            return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
-                    }
-                }
+                if (nbt == null) return "Unknown";
+                // 1.21.11: getNbtCompound returns Optional, use ifPresent pattern
+                if (!nbt.contains("SpawnData")) return "Unknown";
+                NbtCompound spawnData = nbt.getCompoundOrEmpty("SpawnData");
+                if (!spawnData.contains("entity")) return "Unknown";
+                NbtCompound entity = spawnData.getCompoundOrEmpty("entity");
+                String entityId = entity.getString("id").orElse("");
+                if (entityId.contains(":")) entityId = entityId.split(":")[1];
+                if (!entityId.isEmpty())
+                    return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
             }
         } catch (Exception ignored) {}
         return "Unknown";
