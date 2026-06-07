@@ -30,12 +30,11 @@ public class GoofyDebug extends Module {
     private final SettingGroup sgGeneral  = settings.createGroup("General");
 
     // Spawner settings
-    private final Setting<Boolean>      detectSpawners      = sgSpawner.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
-    private final Setting<SettingColor> spawnerFill         = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
-    private final Setting<SettingColor> spawnerLine         = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
-    private final Setting<RenderStyle>  spawnerStyle        = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean>      spawnerToast        = sgSpawner.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
-    // Separate bedrock pillar toggle for spawners
+    private final Setting<Boolean>      detectSpawners       = sgSpawner.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
+    private final Setting<SettingColor> spawnerFill          = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
+    private final Setting<SettingColor> spawnerLine          = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
+    private final Setting<RenderStyle>  spawnerStyle         = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
+    private final Setting<Boolean>      spawnerToast         = sgSpawner.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
     private final Setting<Boolean>      spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder()
         .name("bedrock-pillar")
         .description("Extend spawner pillar from bedrock (-64) to sky (320). Enable when DonutSMP anti-cheat is off.")
@@ -47,15 +46,13 @@ public class GoofyDebug extends Module {
     private final Setting<SettingColor> activityLine   = sgActivity.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(255, 0, 0, 200)).build());
     private final Setting<RenderStyle>  activityStyle  = sgActivity.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
     private final Setting<Boolean>      activityToast  = sgActivity.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
-    // Activity never gets bedrock pillar — intentionally omitted
 
     // Player settings
-    private final Setting<Boolean>      detectPlayers      = sgPlayers.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
-    private final Setting<SettingColor> playerFill         = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
-    private final Setting<SettingColor> playerLine         = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
-    private final Setting<RenderStyle>  playerStyle        = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean>      playerToast        = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
-    // Separate bedrock pillar toggle for players
+    private final Setting<Boolean>      detectPlayers       = sgPlayers.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
+    private final Setting<SettingColor> playerFill          = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
+    private final Setting<SettingColor> playerLine          = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
+    private final Setting<RenderStyle>  playerStyle         = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
+    private final Setting<Boolean>      playerToast         = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
     private final Setting<Boolean>      playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder()
         .name("bedrock-pillar")
         .description("Extend player pillar from bedrock (-64) to sky (320). Enable when DonutSMP anti-cheat is off.")
@@ -69,7 +66,7 @@ public class GoofyDebug extends Module {
     private final Setting<Integer> chunksToScan = sgGeneral.add(new IntSetting.Builder()
         .name("chunks-to-scan")
         .description("How many chunks to scan per activation")
-        .defaultValue(4).min(1).sliderMax(20).build());
+        .defaultValue(50).min(1).sliderMax(200).build());
 
     private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder()
         .name("clear-distance")
@@ -79,13 +76,19 @@ public class GoofyDebug extends Module {
     // Internal state
     private enum ChunkType { PLAYER, SPAWNER, ACTIVITY }
 
+    // FIX 1: Use ConcurrentHashMap for both maps so render thread and tick thread never clash
     private final ConcurrentHashMap<ChunkPos, ChunkType> trackedChunks  = new ConcurrentHashMap<>();
-    private final Set<ChunkPos>                          notifiedChunks = Collections.synchronizedSet(new HashSet<>());
-    private final List<ChunkPos>                         scanQueue      = new ArrayList<>();
+    private final ConcurrentHashMap<ChunkPos, Boolean>   notifiedChunks = new ConcurrentHashMap<>();
+
+    // Scan queue — only touched on tick thread, no concurrent access needed
+    private final List<ChunkPos> scanQueue   = new ArrayList<>();
     private int      scanIndex      = 0;
     private boolean  scanDone       = false;
     private ChunkPos lastPlayerChunk  = null;
     private ChunkPos scanOriginChunk  = null;
+
+    // FIX 2: Snapshot for render thread — built on tick thread, read on render thread, never mutated by render
+    private volatile Map<ChunkPos, ChunkType> renderSnapshot = Collections.emptyMap();
 
     public GoofyDebug() {
         super(NovaDebugAddon.CATEGORY, "Nova Debug", "Highlights chunks with suspicious underground activity.");
@@ -100,6 +103,7 @@ public class GoofyDebug extends Module {
         scanDone         = false;
         lastPlayerChunk  = null;
         scanOriginChunk  = null;
+        renderSnapshot   = Collections.emptyMap();
         buildScanQueue();
         info("Nova Debug v2 by Saint - active.");
     }
@@ -109,6 +113,7 @@ public class GoofyDebug extends Module {
         trackedChunks.clear();
         notifiedChunks.clear();
         scanQueue.clear();
+        renderSnapshot = Collections.emptyMap();
         scanDone = false;
     }
 
@@ -121,31 +126,42 @@ public class GoofyDebug extends Module {
         lastPlayerChunk = playerChunk;
         scanOriginChunk = playerChunk;
         int radius = Math.min(renderDistance.get(), 32);
+
+        // FIX 3: Use chunksToScan as the actual scan radius budget, not a hard cap on queue size
+        // Build the full radius list sorted by distance, then limit to chunksToScan
         List<ChunkPos> all = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 all.add(new ChunkPos(playerChunk.x + dx, playerChunk.z + dz));
             }
         }
-        // Sort by closest first
         all.sort(Comparator.comparingInt(p ->
             Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
-        int limit = chunksToScan.get();
-        for (int i = 0; i < Math.min(limit, all.size()); i++) {
+
+        int limit = Math.min(chunksToScan.get(), all.size());
+        for (int i = 0; i < limit; i++) {
             scanQueue.add(all.get(i));
         }
     }
 
+    // FIX 4: getSpawnerType — guard against null chunk/BE and avoid calling createNbt on render thread
     private String getSpawnerType(WorldChunk chunk, BlockPos spawnerPos) {
+        if (chunk == null || spawnerPos == null) return "Unknown";
         try {
             BlockEntity be = chunk.getBlockEntity(spawnerPos);
             if (be instanceof MobSpawnerBlockEntity spawner) {
+                // createNbt is safe here — we are always on the tick/main thread when scanChunk runs
                 NbtCompound nbt = spawner.createNbt(mc.world.getRegistryManager());
-                if (nbt.contains("SpawnData")) {
-                    String entityId = nbt.getCompound("SpawnData").getCompound("entity").getString("id");
-                    if (entityId.contains(":")) entityId = entityId.split(":")[1];
-                    if (!entityId.isEmpty())
-                        return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
+                if (nbt != null && nbt.contains("SpawnData")) {
+                    NbtCompound spawnData = nbt.getCompound("SpawnData");
+                    if (spawnData != null && spawnData.contains("entity")) {
+                        NbtCompound entity = spawnData.getCompound("entity");
+                        String entityId = entity != null ? entity.getString("id") : "";
+                        if (entityId != null && entityId.contains(":"))
+                            entityId = entityId.split(":")[1];
+                        if (entityId != null && !entityId.isEmpty())
+                            return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
+                    }
                 }
             }
         } catch (Exception ignored) {}
@@ -157,38 +173,48 @@ public class GoofyDebug extends Module {
             if (mc.world == null || mc.player == null) return;
             if (!mc.world.isChunkLoaded(pos.x, pos.z)) return;
 
+            // FIX 5: Null-check the chunk itself — getChunk can return null or an empty chunk
             WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
+            if (chunk == null || chunk.isEmpty()) return;
 
-            // Players — check first, highest priority
+            // Players — highest priority
             if (detectPlayers.get()) {
-                for (PlayerEntity p : mc.world.getPlayers()) {
-                    if (p == mc.player) continue;
-                    if (p.getChunkPos().x == pos.x && p.getChunkPos().z == pos.z) {
-                        boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
-                        trackedChunks.put(pos, ChunkType.PLAYER);
-                        if (isNew && playerToast.get() && !notifiedChunks.contains(pos)) {
-                            info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
-                            notifiedChunks.add(pos);
+                List<? extends PlayerEntity> players = mc.world.getPlayers();
+                if (players != null) {
+                    for (PlayerEntity p : players) {
+                        if (p == null || p == mc.player) continue;
+                        ChunkPos pChunk = p.getChunkPos();
+                        if (pChunk.x == pos.x && pChunk.z == pos.z) {
+                            boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
+                            trackedChunks.put(pos, ChunkType.PLAYER);
+                            if (isNew && playerToast.get() && !notifiedChunks.containsKey(pos)) {
+                                info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
+                                notifiedChunks.put(pos, Boolean.TRUE);
+                            }
+                            return;
                         }
-                        return;
                     }
                 }
             }
 
-            // Spawners — scan the ENTIRE chunk height (-64 to 320) to catch all spawners
+            // Spawners — full height scan
             if (detectSpawners.get()) {
                 BlockPos foundPos = null;
                 int spawnerCount  = 0;
+                int bottomY = mc.world.getBottomY();
+                int topY    = mc.world.getTopY();
 
                 for (int lx = 0; lx < 16; lx++) {
                     for (int lz = 0; lz < 16; lz++) {
-                        // Full world height scan: -64 to 320
-                        for (int y = mc.world.getBottomY(); y < mc.world.getTopY(); y++) {
+                        for (int y = bottomY; y < topY; y++) {
                             BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
-                            if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
-                                if (foundPos == null) foundPos = bp;
-                                spawnerCount++;
-                            }
+                            // FIX 6: Guard getBlockState — can throw on partially-loaded chunks
+                            try {
+                                if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
+                                    if (foundPos == null) foundPos = bp;
+                                    spawnerCount++;
+                                }
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
@@ -196,14 +222,14 @@ public class GoofyDebug extends Module {
                 if (foundPos != null) {
                     boolean isNew = !ChunkType.SPAWNER.equals(trackedChunks.get(pos));
                     trackedChunks.put(pos, ChunkType.SPAWNER);
-                    if (isNew && spawnerToast.get() && !notifiedChunks.contains(pos)) {
+                    if (isNew && spawnerToast.get() && !notifiedChunks.containsKey(pos)) {
                         String spawnerType = getSpawnerType(chunk, foundPos);
                         if (spawnerCount == 1) {
                             info("§9[Nova Debug] §f" + spawnerType + " §9Spawner found!");
                         } else {
                             info("§9[Nova Debug] §f" + spawnerCount + " §9Spawners found! (first: §f" + spawnerType + "§9)");
                         }
-                        notifiedChunks.add(pos);
+                        notifiedChunks.put(pos, Boolean.TRUE);
                     }
                     return;
                 }
@@ -213,13 +239,13 @@ public class GoofyDebug extends Module {
             if (detectActivity.get()) {
                 boolean isNew = !ChunkType.ACTIVITY.equals(trackedChunks.get(pos));
                 trackedChunks.put(pos, ChunkType.ACTIVITY);
-                if (isNew && activityToast.get() && !notifiedChunks.contains(pos)) {
+                if (isNew && activityToast.get() && !notifiedChunks.containsKey(pos)) {
                     info("§c[Nova Debug] Player Activity §ffound!");
-                    notifiedChunks.add(pos);
+                    notifiedChunks.put(pos, Boolean.TRUE);
                 }
             }
         } catch (Exception e) {
-            error("Scan error: " + e.getMessage());
+            error("Scan error at " + pos + ": " + e.getMessage());
         }
     }
 
@@ -228,39 +254,51 @@ public class GoofyDebug extends Module {
         try {
             if (mc.world == null || mc.player == null) return;
 
-            // Live player tracking every tick
+            // Live player tracking
             if (detectPlayers.get()) {
                 ChunkPos playerChunk = mc.player.getChunkPos();
                 int radius = Math.min(renderDistance.get(), 32);
 
-                // Remove chunks where the tracked player has left
-                trackedChunks.entrySet().removeIf(e -> {
-                    if (e.getValue() != ChunkType.PLAYER) return false;
+                // FIX 7: Collect keys to remove first, then remove — avoids removeIf + concurrent read clash
+                List<ChunkPos> toRemove = new ArrayList<>();
+                for (Map.Entry<ChunkPos, ChunkType> e : trackedChunks.entrySet()) {
+                    if (e.getValue() != ChunkType.PLAYER) continue;
                     ChunkPos pos = e.getKey();
-                    for (PlayerEntity p : mc.world.getPlayers()) {
-                        if (p == mc.player) continue;
-                        if (p.getChunkPos().x == pos.x && p.getChunkPos().z == pos.z) return false;
+                    boolean found = false;
+                    List<? extends PlayerEntity> players = mc.world.getPlayers();
+                    if (players != null) {
+                        for (PlayerEntity p : players) {
+                            if (p == null || p == mc.player) continue;
+                            ChunkPos pc = p.getChunkPos();
+                            if (pc.x == pos.x && pc.z == pos.z) { found = true; break; }
+                        }
                     }
+                    if (!found) toRemove.add(pos);
+                }
+                for (ChunkPos pos : toRemove) {
+                    trackedChunks.remove(pos);
                     notifiedChunks.remove(pos);
-                    return true;
-                });
+                }
 
                 // Add new player positions
-                for (PlayerEntity p : mc.world.getPlayers()) {
-                    if (p == mc.player) continue;
-                    ChunkPos pos = p.getChunkPos();
-                    if (Math.abs(pos.x - playerChunk.x) > radius) continue;
-                    if (Math.abs(pos.z - playerChunk.z) > radius) continue;
-                    boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
-                    trackedChunks.put(pos, ChunkType.PLAYER);
-                    if (isNew && playerToast.get() && !notifiedChunks.contains(pos)) {
-                        info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
-                        notifiedChunks.add(pos);
+                List<? extends PlayerEntity> players = mc.world.getPlayers();
+                if (players != null) {
+                    for (PlayerEntity p : players) {
+                        if (p == null || p == mc.player) continue;
+                        ChunkPos pos = p.getChunkPos();
+                        if (Math.abs(pos.x - playerChunk.x) > radius) continue;
+                        if (Math.abs(pos.z - playerChunk.z) > radius) continue;
+                        boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
+                        trackedChunks.put(pos, ChunkType.PLAYER);
+                        if (isNew && playerToast.get() && !notifiedChunks.containsKey(pos)) {
+                            info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
+                            notifiedChunks.put(pos, Boolean.TRUE);
+                        }
                     }
                 }
             }
 
-            // Only clear spawner/activity data when player moves past clearDistance
+            // Clear spawner/activity data when player moves far enough
             ChunkPos currentChunk = mc.player.getChunkPos();
             int cd = clearDistance.get();
             boolean movedPastClearDistance = scanOriginChunk != null && cd > 0 && (
@@ -269,19 +307,30 @@ public class GoofyDebug extends Module {
             );
 
             if (movedPastClearDistance || scanOriginChunk == null) {
-                trackedChunks.entrySet().removeIf(e -> e.getValue() != ChunkType.PLAYER);
-                notifiedChunks.clear();
+                // FIX 8: Collect non-PLAYER keys first, then remove — no concurrent modification
+                List<ChunkPos> stale = new ArrayList<>();
+                for (Map.Entry<ChunkPos, ChunkType> e : trackedChunks.entrySet()) {
+                    if (e.getValue() != ChunkType.PLAYER) stale.add(e.getKey());
+                }
+                for (ChunkPos pos : stale) {
+                    trackedChunks.remove(pos);
+                    notifiedChunks.remove(pos);
+                }
                 buildScanQueue();
             } else {
                 lastPlayerChunk = currentChunk;
             }
 
-            // Scan one chunk per tick
+            // Scan one chunk per tick from the queue
             if (!scanDone && scanIndex < scanQueue.size()) {
                 scanChunk(scanQueue.get(scanIndex));
                 scanIndex++;
                 if (scanIndex >= scanQueue.size()) scanDone = true;
             }
+
+            // FIX 9: Publish a snapshot for the render thread — immutable copy, no shared mutable state
+            renderSnapshot = new HashMap<>(trackedChunks);
+
         } catch (Exception e) {
             error("Tick error: " + e.getMessage());
         }
@@ -291,14 +340,17 @@ public class GoofyDebug extends Module {
     private void onRender3D(Render3DEvent event) {
         try {
             if (mc.world == null || mc.player == null) return;
-            if (trackedChunks.isEmpty()) return;
+
+            // FIX 10: Read from the snapshot, NOT trackedChunks — render thread never touches live map
+            Map<ChunkPos, ChunkType> snapshot = renderSnapshot;
+            if (snapshot == null || snapshot.isEmpty()) return;
 
             double px      = mc.player.getX();
             double pz      = mc.player.getZ();
             int distBlocks = renderDistance.get() * 16;
             double distSq  = (double) distBlocks * distBlocks;
 
-            for (Map.Entry<ChunkPos, ChunkType> entry : trackedChunks.entrySet()) {
+            for (Map.Entry<ChunkPos, ChunkType> entry : snapshot.entrySet()) {
                 ChunkPos  pos  = entry.getKey();
                 ChunkType type = entry.getValue();
 
@@ -319,18 +371,15 @@ public class GoofyDebug extends Module {
                         fill  = c(spawnerFill.get());
                         line  = c(spawnerLine.get());
                         style = spawnerStyle.get();
-                        // Spawner has its own bedrock pillar toggle
                         yMax  = spawnerBedrockPillar.get() ? 320 : 64;
                     }
                     case PLAYER -> {
                         fill  = c(playerFill.get());
                         line  = c(playerLine.get());
                         style = playerStyle.get();
-                        // Player has its own bedrock pillar toggle
                         yMax  = playerBedrockPillar.get() ? 320 : 64;
                     }
                     default -> {
-                        // Activity — never bedrock pillar, always underground only
                         fill  = c(activityFill.get());
                         line  = c(activityLine.get());
                         style = activityStyle.get();
