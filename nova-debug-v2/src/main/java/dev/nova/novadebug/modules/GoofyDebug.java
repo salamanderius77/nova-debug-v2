@@ -39,11 +39,12 @@ public class GoofyDebug extends Module {
     private final Setting<RenderStyle>  playerStyle = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
     private final Setting<Boolean> playerToast = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").description("Show chat message when player found").defaultValue(true).build());
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(8).min(1).sliderMax(20).build());
-    private final Setting<Integer> updateInterval = sgGeneral.add(new IntSetting.Builder().name("update-interval").defaultValue(1).min(1).sliderMax(20).build());
+    private final Setting<Integer> updateInterval = sgGeneral.add(new IntSetting.Builder().name("update-interval").description("Spawner scan speed in ticks").defaultValue(1).min(1).sliderMax(20).build());
     private enum ChunkType { PLAYER, SPAWNER, ACTIVITY }
     private final ConcurrentHashMap<ChunkPos, ChunkType> trackedChunks = new ConcurrentHashMap<>();
     private final Set<ChunkPos> notifiedChunks = Collections.synchronizedSet(new HashSet<>());
     private int tickCounter = 0;
+    private int activityTick = 0;
     public GoofyDebug() {
         super(NovaDebugAddon.CATEGORY, "Nova Debug", "Highlights chunks with suspicious underground activity.");
     }
@@ -52,27 +53,15 @@ public class GoofyDebug extends Module {
         trackedChunks.clear();
         notifiedChunks.clear();
         tickCounter = 0;
-        fullScan();
+        activityTick = 0;
+        scanActivityAndPlayers();
+        scanSpawners();
         info("Nova Debug v2 by Saint - active.");
     }
     @Override
     public void onDeactivate() {
         trackedChunks.clear();
         notifiedChunks.clear();
-    }
-    private void fullScan() {
-        try {
-            if (mc.world == null || mc.player == null) return;
-            ChunkPos playerChunk = mc.player.getChunkPos();
-            int radius = Math.min(renderDistance.get(), 12);
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    scanChunk(new ChunkPos(playerChunk.x + dx, playerChunk.z + dz));
-                }
-            }
-        } catch (Exception e) {
-            error("Scan error: " + e.getMessage());
-        }
     }
     private String getSpawnerType(WorldChunk chunk, BlockPos spawnerPos) {
         try {
@@ -88,63 +77,82 @@ public class GoofyDebug extends Module {
         } catch (Exception ignored) {}
         return "Unknown";
     }
-    private void scanChunk(ChunkPos pos) {
+    private void scanActivityAndPlayers() {
         try {
             if (mc.world == null || mc.player == null) return;
-            if (!mc.world.isChunkLoaded(pos.x, pos.z)) return;
-            // Players (highest priority)
-            if (detectPlayers.get()) {
-                for (AbstractClientPlayerEntity p : mc.world.getPlayers()) {
-                    if (p == mc.player) continue;
-                    if (p.getChunkPos().x == pos.x && p.getChunkPos().z == pos.z) {
-                        boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
-                        trackedChunks.put(pos, ChunkType.PLAYER);
-                        if (isNew && playerToast.get() && !notifiedChunks.contains(pos)) {
-                            info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound! Chunk X:" + pos.getCenterX() + " Z:" + pos.getCenterZ());
-                            notifiedChunks.add(pos);
+            ChunkPos playerChunk = mc.player.getChunkPos();
+            int radius = Math.min(renderDistance.get(), 12);
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    ChunkPos pos = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
+                    if (!mc.world.isChunkLoaded(pos.x, pos.z)) continue;
+                    if (detectPlayers.get()) {
+                        for (AbstractClientPlayerEntity p : mc.world.getPlayers()) {
+                            if (p == mc.player) continue;
+                            if (p.getChunkPos().x == pos.x && p.getChunkPos().z == pos.z) {
+                                boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
+                                trackedChunks.put(pos, ChunkType.PLAYER);
+                                if (isNew && playerToast.get() && !notifiedChunks.contains(pos)) {
+                                    info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
+                                    notifiedChunks.add(pos);
+                                }
+                                break;
+                            }
                         }
-                        return;
                     }
-                }
-            }
-            // Spawners - detects 1 or more
-            if (detectSpawners.get()) {
-                WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
-                BlockPos foundPos = null;
-                outer:
-                for (int lx = 0; lx < 16; lx++) {
-                    for (int lz = 0; lz < 16; lz++) {
-                        for (int y = -64; y < 64; y++) {
-                            BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
-                            if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
-                                foundPos = bp;
-                                break outer;
+                    if (detectActivity.get()) {
+                        if (!trackedChunks.containsKey(pos) || trackedChunks.get(pos) == ChunkType.ACTIVITY) {
+                            boolean isNew = !ChunkType.ACTIVITY.equals(trackedChunks.get(pos));
+                            trackedChunks.put(pos, ChunkType.ACTIVITY);
+                            if (isNew && activityToast.get() && !notifiedChunks.contains(pos)) {
+                                info("§c[Nova Debug] Player Activity §ffound!");
+                                notifiedChunks.add(pos);
                             }
                         }
                     }
                 }
-                if (foundPos != null) {
-                    boolean isNew = !ChunkType.SPAWNER.equals(trackedChunks.get(pos));
-                    trackedChunks.put(pos, ChunkType.SPAWNER);
-                    if (isNew && spawnerToast.get() && !notifiedChunks.contains(pos)) {
-                        String spawnerType = getSpawnerType(chunk, foundPos);
-                        info("§9[Nova Debug] " + spawnerType + " Spawner §ffound! Chunk X:" + pos.getCenterX() + " Z:" + pos.getCenterZ() + " (Y:" + foundPos.getY() + ")");
-                        notifiedChunks.add(pos);
-                    }
-                    return;
-                }
             }
-            // Player Activity
-            if (detectActivity.get()) {
-                boolean isNew = !ChunkType.ACTIVITY.equals(trackedChunks.get(pos));
-                trackedChunks.put(pos, ChunkType.ACTIVITY);
-                if (isNew && activityToast.get() && !notifiedChunks.contains(pos)) {
-                    info("§c[Nova Debug] Player Activity §ffound! Chunk X:" + pos.getCenterX() + " Z:" + pos.getCenterZ());
-                    notifiedChunks.add(pos);
+        } catch (Exception e) {
+            error("Activity scan error: " + e.getMessage());
+        }
+    }
+    private void scanSpawners() {
+        try {
+            if (mc.world == null || mc.player == null) return;
+            ChunkPos playerChunk = mc.player.getChunkPos();
+            int radius = Math.min(renderDistance.get(), 12);
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    ChunkPos pos = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
+                    if (!mc.world.isChunkLoaded(pos.x, pos.z)) continue;
+                    if (!detectSpawners.get()) continue;
+                    WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
+                    BlockPos foundPos = null;
+                    outer:
+                    for (int lx = 0; lx < 16; lx++) {
+                        for (int lz = 0; lz < 16; lz++) {
+                            for (int y = -64; y < 64; y++) {
+                                BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
+                                if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
+                                    foundPos = bp;
+                                    break outer;
+                                }
+                            }
+                        }
+                    }
+                    if (foundPos != null) {
+                        boolean isNew = !ChunkType.SPAWNER.equals(trackedChunks.get(pos));
+                        trackedChunks.put(pos, ChunkType.SPAWNER);
+                        if (isNew && spawnerToast.get() && !notifiedChunks.contains(pos)) {
+                            String spawnerType = getSpawnerType(chunk, foundPos);
+                            info("§9[Nova Debug] " + spawnerType + " Spawner §ffound!");
+                            notifiedChunks.add(pos);
+                        }
+                    }
                 }
             }
         } catch (Exception e) {
-            error("Chunk scan error: " + e.getMessage());
+            error("Spawner scan error: " + e.getMessage());
         }
     }
     @EventHandler
@@ -152,7 +160,14 @@ public class GoofyDebug extends Module {
         try {
             if (mc.world == null || mc.player == null) return;
             tickCounter++;
-            if (tickCounter % Math.max(1, updateInterval.get()) != 0) return;
+            activityTick++;
+            if (activityTick >= 1) {
+                activityTick = 0;
+                scanActivityAndPlayers();
+            }
+            if (tickCounter % Math.max(1, updateInterval.get()) == 0) {
+                scanSpawners();
+            }
             trackedChunks.entrySet().removeIf(e -> {
                 if (e.getValue() != ChunkType.PLAYER) return false;
                 ChunkPos pos = e.getKey();
@@ -163,7 +178,6 @@ public class GoofyDebug extends Module {
                 notifiedChunks.remove(pos);
                 return true;
             });
-            fullScan();
         } catch (Exception e) {
             error("Tick error: " + e.getMessage());
         }
