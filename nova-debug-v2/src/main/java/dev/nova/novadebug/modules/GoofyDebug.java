@@ -1,4 +1,5 @@
 package dev.nova.novadebug.modules;
+
 import dev.nova.novadebug.NovaDebugAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -8,14 +9,16 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.class_1923;
-import net.minecraft.class_2246;
-import net.minecraft.class_2338;
-import net.minecraft.class_2487;
-import net.minecraft.class_2586;
-import net.minecraft.class_2636;
-import net.minecraft.class_2818;
-import net.minecraft.class_742;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.MobSpawnerBlockEntity;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.chunk.WorldChunk;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -58,13 +61,13 @@ public class GoofyDebug extends Module {
         .description("How many chunks to scan per activation")
         .defaultValue(4).min(1).sliderMax(20).build());
 
-    // FIX 1: Player must move this many chunks before spawner/activity highlights clear
+    // FIX 1: how far the player must move before spawner/activity highlights clear
     private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder()
         .name("clear-distance")
         .description("How many chunks you must move before spawner/activity highlights clear. 0 = never clear.")
         .defaultValue(26).min(0).sliderMax(32).build());
 
-    // FIX 2: Extend pillars to full bedrock-to-sky height when anti-cheat is off
+    // FIX 2: extend pillars to bedrock-to-sky when anti-cheat is off
     private final Setting<Boolean> bedrockPillars = sgGeneral.add(new BoolSetting.Builder()
         .name("bedrock-pillars")
         .description("Extend player and spawner pillars from bedrock (-64) to sky (320). Enable when DonutSMP anti-cheat is off.")
@@ -73,15 +76,15 @@ public class GoofyDebug extends Module {
     // Internal state
     private enum ChunkType { PLAYER, SPAWNER, ACTIVITY }
 
-    private final ConcurrentHashMap<class_1923, ChunkType> trackedChunks = new ConcurrentHashMap<>();
-    private final Set<class_1923>  notifiedChunks = Collections.synchronizedSet(new HashSet<>());
-    private final List<class_1923> scanQueue      = new ArrayList<>();
-    private int     scanIndex   = 0;
-    private int     tickCounter = 0;
-    private boolean scanDone    = false;
-    private class_1923 lastPlayerChunk    = null;
-    // FIX 1: remember where the scan started so we measure distance from there
-    private class_1923 scanOriginChunk    = null;
+    private final ConcurrentHashMap<ChunkPos, ChunkType> trackedChunks  = new ConcurrentHashMap<>();
+    private final Set<ChunkPos>                          notifiedChunks = Collections.synchronizedSet(new HashSet<>());
+    private final List<ChunkPos>                         scanQueue      = new ArrayList<>();
+    private int      scanIndex      = 0;
+    private int      tickCounter    = 0;
+    private boolean  scanDone       = false;
+    private ChunkPos lastPlayerChunk  = null;
+    // FIX 1: origin of the last scan — used to measure how far player has moved
+    private ChunkPos scanOriginChunk  = null;
 
     public GoofyDebug() {
         super(NovaDebugAddon.CATEGORY, "Nova Debug", "Highlights chunks with suspicious underground activity.");
@@ -92,9 +95,9 @@ public class GoofyDebug extends Module {
         trackedChunks.clear();
         notifiedChunks.clear();
         scanQueue.clear();
-        scanIndex   = 0;
-        tickCounter = 0;
-        scanDone    = false;
+        scanIndex      = 0;
+        tickCounter    = 0;
+        scanDone       = false;
         lastPlayerChunk  = null;
         scanOriginChunk  = null;
         buildScanQueue();
@@ -110,35 +113,35 @@ public class GoofyDebug extends Module {
     }
 
     private void buildScanQueue() {
-        if (mc.field_1687 == null || mc.field_1724 == null) return;
+        if (mc.world == null || mc.player == null) return;
         scanQueue.clear();
         scanIndex = 0;
         scanDone  = false;
-        class_1923 playerChunk = mc.field_1724.method_31476();
-        lastPlayerChunk = playerChunk;
-        scanOriginChunk = playerChunk; // remember where we started scanning
+        ChunkPos playerChunk = mc.player.getChunkPos();
+        lastPlayerChunk  = playerChunk;
+        scanOriginChunk  = playerChunk;
         int radius = Math.min(renderDistance.get(), 32);
-        List<class_1923> all = new ArrayList<>();
+        List<ChunkPos> all = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                all.add(new class_1923(playerChunk.field_9181 + dx, playerChunk.field_9180 + dz));
+                all.add(new ChunkPos(playerChunk.x + dx, playerChunk.z + dz));
             }
         }
         all.sort(Comparator.comparingInt(p ->
-            Math.abs(p.field_9181 - playerChunk.field_9181) + Math.abs(p.field_9180 - playerChunk.field_9180)));
+            Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
         int limit = chunksToScan.get();
         for (int i = 0; i < Math.min(limit, all.size()); i++) {
             scanQueue.add(all.get(i));
         }
     }
 
-    private String getSpawnerType(class_2818 chunk, class_2338 spawnerPos) {
+    private String getSpawnerType(WorldChunk chunk, BlockPos spawnerPos) {
         try {
-            class_2586 be = chunk.method_8321(spawnerPos);
-            if (be instanceof class_2636 spawner) {
-                var nbt = spawner.method_16887(mc.field_1687.method_30349());
-                if (nbt.method_10545("SpawnData")) {
-                    String entityId = nbt.method_10562("SpawnData").method_10562("entity").method_10558("id");
+            BlockEntity be = chunk.getBlockEntity(spawnerPos);
+            if (be instanceof MobSpawnerBlockEntity spawner) {
+                NbtCompound nbt = spawner.createNbt(mc.world.getRegistryManager());
+                if (nbt.contains("SpawnData")) {
+                    String entityId = nbt.getCompound("SpawnData").getCompound("entity").getString("id");
                     if (entityId.contains(":")) entityId = entityId.split(":")[1];
                     if (!entityId.isEmpty()) return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
                 }
@@ -147,20 +150,20 @@ public class GoofyDebug extends Module {
         return "Unknown";
     }
 
-    private void scanChunk(class_1923 pos) {
+    private void scanChunk(ChunkPos pos) {
         try {
-            if (mc.field_1687 == null || mc.field_1724 == null) return;
-            if (!mc.field_1687.method_8393(pos.field_9181, pos.field_9180)) return;
+            if (mc.world == null || mc.player == null) return;
+            if (!mc.world.isChunkLoaded(pos.x, pos.z)) return;
 
             // Players
             if (detectPlayers.get()) {
-                for (class_742 p : mc.field_1687.method_18456()) {
-                    if (p == mc.field_1724) continue;
-                    if (p.method_31476().field_9181 == pos.field_9181 && p.method_31476().field_9180 == pos.field_9180) {
+                for (PlayerEntity p : mc.world.getPlayers()) {
+                    if (p == mc.player) continue;
+                    if (p.getChunkPos().x == pos.x && p.getChunkPos().z == pos.z) {
                         boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
                         trackedChunks.put(pos, ChunkType.PLAYER);
                         if (isNew && playerToast.get() && !notifiedChunks.contains(pos)) {
-                            info("§d[Nova Debug] Player §f" + p.method_5477().getString() + " §dfound!");
+                            info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
                             notifiedChunks.add(pos);
                         }
                         return;
@@ -170,14 +173,14 @@ public class GoofyDebug extends Module {
 
             // Spawners
             if (detectSpawners.get()) {
-                class_2818 chunk = mc.field_1687.method_8497(pos.field_9181, pos.field_9180);
-                class_2338 foundPos = null;
+                WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
+                BlockPos foundPos = null;
                 outer:
                 for (int lx = 0; lx < 16; lx++) {
                     for (int lz = 0; lz < 16; lz++) {
                         for (int y = -64; y < 64; y++) {
-                            class_2338 bp = new class_2338(pos.method_8326() + lx, y, pos.method_8328() + lz);
-                            if (chunk.method_8320(bp).method_27852(class_2246.field_10260)) {
+                            BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
+                            if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
                                 foundPos = bp;
                                 break outer;
                             }
@@ -213,57 +216,55 @@ public class GoofyDebug extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         try {
-            if (mc.field_1687 == null || mc.field_1724 == null) return;
+            if (mc.world == null || mc.player == null) return;
 
             // Live player tracking every tick
             if (detectPlayers.get()) {
-                class_1923 playerChunk = mc.field_1724.method_31476();
+                ChunkPos playerChunk = mc.player.getChunkPos();
                 int radius = Math.min(renderDistance.get(), 32);
 
                 // Remove chunks where the tracked player has left
                 trackedChunks.entrySet().removeIf(e -> {
                     if (e.getValue() != ChunkType.PLAYER) return false;
-                    class_1923 pos = e.getKey();
-                    for (class_742 p : mc.field_1687.method_18456()) {
-                        if (p == mc.field_1724) continue;
-                        if (p.method_31476().field_9181 == pos.field_9181 && p.method_31476().field_9180 == pos.field_9180) return false;
+                    ChunkPos pos = e.getKey();
+                    for (PlayerEntity p : mc.world.getPlayers()) {
+                        if (p == mc.player) continue;
+                        if (p.getChunkPos().x == pos.x && p.getChunkPos().z == pos.z) return false;
                     }
                     notifiedChunks.remove(pos);
                     return true;
                 });
 
                 // Add new player positions
-                for (class_742 p : mc.field_1687.method_18456()) {
-                    if (p == mc.field_1724) continue;
-                    class_1923 pos = p.method_31476();
-                    if (Math.abs(pos.field_9181 - playerChunk.field_9181) > radius) continue;
-                    if (Math.abs(pos.field_9180 - playerChunk.field_9180) > radius) continue;
+                for (PlayerEntity p : mc.world.getPlayers()) {
+                    if (p == mc.player) continue;
+                    ChunkPos pos = p.getChunkPos();
+                    if (Math.abs(pos.x - playerChunk.x) > radius) continue;
+                    if (Math.abs(pos.z - playerChunk.z) > radius) continue;
                     boolean isNew = !ChunkType.PLAYER.equals(trackedChunks.get(pos));
                     trackedChunks.put(pos, ChunkType.PLAYER);
                     if (isNew && playerToast.get() && !notifiedChunks.contains(pos)) {
-                        info("§d[Nova Debug] Player §f" + p.method_5477().getString() + " §dfound!");
+                        info("§d[Nova Debug] Player §f" + p.getName().getString() + " §dfound!");
                         notifiedChunks.add(pos);
                     }
                 }
             }
 
-            // FIX 1: Only wipe spawner/activity data when the player has moved
-            // further than clearDistance chunks from where the scan started.
-            // Moving just 1 chunk no longer clears anything.
-            class_1923 currentChunk = mc.field_1724.method_31476();
+            // FIX 1: Only clear spawner/activity data when the player has moved
+            // further than clearDistance chunks from the scan origin.
+            // Moving 1 chunk no longer wipes highlights.
+            ChunkPos currentChunk = mc.player.getChunkPos();
             int cd = clearDistance.get();
             boolean movedPastClearDistance = scanOriginChunk != null && cd > 0 && (
-                Math.abs(currentChunk.field_9181 - scanOriginChunk.field_9181) > cd ||
-                Math.abs(currentChunk.field_9180 - scanOriginChunk.field_9180) > cd
+                Math.abs(currentChunk.x - scanOriginChunk.x) > cd ||
+                Math.abs(currentChunk.z - scanOriginChunk.z) > cd
             );
 
             if (movedPastClearDistance || scanOriginChunk == null) {
-                // Far enough away — clear and re-scan from new position
                 trackedChunks.entrySet().removeIf(e -> e.getValue() != ChunkType.PLAYER);
                 notifiedChunks.clear();
                 buildScanQueue();
             } else {
-                // Just update the lastPlayerChunk reference (no data wipe)
                 lastPlayerChunk = currentChunk;
             }
 
@@ -281,20 +282,20 @@ public class GoofyDebug extends Module {
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         try {
-            if (mc.field_1687 == null || mc.field_1724 == null) return;
+            if (mc.world == null || mc.player == null) return;
             if (trackedChunks.isEmpty()) return;
 
-            double px      = mc.field_1724.method_23317();
-            double pz      = mc.field_1724.method_23321();
+            double px      = mc.player.getX();
+            double pz      = mc.player.getZ();
             int distBlocks = renderDistance.get() * 16;
             double distSq  = (double) distBlocks * distBlocks;
 
-            for (Map.Entry<class_1923, ChunkType> entry : trackedChunks.entrySet()) {
-                class_1923 pos  = entry.getKey();
-                ChunkType  type = entry.getValue();
+            for (Map.Entry<ChunkPos, ChunkType> entry : trackedChunks.entrySet()) {
+                ChunkPos    pos  = entry.getKey();
+                ChunkType   type = entry.getValue();
 
-                double cx  = pos.method_33940();
-                double cz  = pos.method_33942();
+                double cx  = pos.getCenterX();
+                double cz  = pos.getCenterZ();
                 double ddx = cx - px;
                 double ddz = cz - pz;
                 if (ddx * ddx + ddz * ddz > distSq) continue;
@@ -309,15 +310,14 @@ public class GoofyDebug extends Module {
                     default       -> { fill = c(playerFill.get());   line = c(playerLine.get());   style = playerStyle.get(); }
                 }
 
-                int x1 = pos.method_8326();
-                int z1 = pos.method_8328();
+                int x1 = pos.getStartX();
+                int z1 = pos.getStartZ();
                 int x2 = x1 + 16;
                 int z2 = z1 + 16;
 
                 if (style == RenderStyle.Pillar) {
-                    // FIX 2: When bedrockPillars is ON (anti-cheat off), pillars go
-                    // all the way from bedrock (-64) to build limit (320).
-                    // When OFF (anti-cheat on), pillars only show underground (-64 to 64).
+                    // FIX 2: bedrockPillars ON = full bedrock (-64) to sky (320)
+                    //         bedrockPillars OFF = underground only (-64 to 64)
                     int yMin = -64;
                     int yMax = bedrockPillars.get() ? 320 : 64;
                     event.renderer.box(x1, yMin, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
