@@ -11,10 +11,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.MobSpawnerBlockEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
@@ -190,31 +187,6 @@ public class GoofyDebug extends Module {
     }
 
     private String getSpawnerType(WorldChunk chunk, BlockPos spawnerPos) {
-        // NBT API changed in 1.21.11 — safely attempt to read mob type, fall back to "Unknown"
-        if (chunk == null || spawnerPos == null) return "Unknown";
-        try {
-            BlockEntity be = chunk.getBlockEntity(spawnerPos);
-            if (be instanceof MobSpawnerBlockEntity spawner) {
-                NbtCompound nbt = spawner.createNbt(mc.world.getRegistryManager());
-                if (nbt == null) return "Unknown";
-                // Use single-arg contains which is stable, then cast via get()
-                if (!nbt.contains("SpawnData")) return "Unknown";
-                net.minecraft.nbt.NbtElement sdElem = nbt.get("SpawnData");
-                if (!(sdElem instanceof NbtCompound)) return "Unknown";
-                NbtCompound spawnData = (NbtCompound) sdElem;
-                if (!spawnData.contains("entity")) return "Unknown";
-                net.minecraft.nbt.NbtElement entElem = spawnData.get("entity");
-                if (!(entElem instanceof NbtCompound)) return "Unknown";
-                NbtCompound entity = (NbtCompound) entElem;
-                if (!entity.contains("id")) return "Unknown";
-                net.minecraft.nbt.NbtElement idElem = entity.get("id");
-                if (idElem == null) return "Unknown";
-                String entityId = idElem.asString();
-                if (entityId == null || entityId.isEmpty()) return "Unknown";
-                if (entityId.contains(":")) entityId = entityId.split(":")[1];
-                return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
-            }
-        } catch (Exception ignored) {}
         return "Unknown";
     }
 
