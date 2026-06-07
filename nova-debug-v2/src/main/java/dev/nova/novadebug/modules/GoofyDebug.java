@@ -78,12 +78,12 @@ public class GoofyDebug extends Module {
         try {
             BlockEntity be = chunk.getBlockEntity(spawnerPos);
             if (be instanceof MobSpawnerBlockEntity spawner) {
-                String entityId = spawner.getLogic()
-                    .getSpawnEntry(mc.world, mc.world.random, spawnerPos)
-                    .getNbt().getString("id");
-                if (entityId.contains(":")) entityId = entityId.split(":")[1];
-                if (entityId.isEmpty()) return "Unknown";
-                return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
+                var nbt = spawner.toInitialChunkDataNbt(mc.world.getRegistryManager());
+                if (nbt.contains("SpawnData")) {
+                    String entityId = nbt.getCompound("SpawnData").getCompound("entity").getString("id");
+                    if (entityId.contains(":")) entityId = entityId.split(":")[1];
+                    if (!entityId.isEmpty()) return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
+                }
             }
         } catch (Exception ignored) {}
         return "Unknown";
@@ -107,7 +107,7 @@ public class GoofyDebug extends Module {
                     }
                 }
             }
-            // Spawners (1 or more = highlight)
+            // Spawners - detects 1 or more
             if (detectSpawners.get()) {
                 WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
                 BlockPos foundPos = null;
@@ -134,7 +134,7 @@ public class GoofyDebug extends Module {
                     return;
                 }
             }
-            // Player Activity (instant detection)
+            // Player Activity
             if (detectActivity.get()) {
                 boolean isNew = !ChunkType.ACTIVITY.equals(trackedChunks.get(pos));
                 trackedChunks.put(pos, ChunkType.ACTIVITY);
@@ -153,7 +153,6 @@ public class GoofyDebug extends Module {
             if (mc.world == null || mc.player == null) return;
             tickCounter++;
             if (tickCounter % Math.max(1, updateInterval.get()) != 0) return;
-            // Remove players that left chunks
             trackedChunks.entrySet().removeIf(e -> {
                 if (e.getValue() != ChunkType.PLAYER) return false;
                 ChunkPos pos = e.getKey();
