@@ -196,12 +196,12 @@ public class GoofyDebug extends Module {
             if (be instanceof MobSpawnerBlockEntity spawner) {
                 NbtCompound nbt = spawner.createNbt(mc.world.getRegistryManager());
                 if (nbt == null) return "Unknown";
-                // 1.21.11: getNbtCompound returns Optional, use ifPresent pattern
-                if (!nbt.contains("SpawnData")) return "Unknown";
-                NbtCompound spawnData = nbt.getCompoundOrEmpty("SpawnData");
-                if (!spawnData.contains("entity")) return "Unknown";
-                NbtCompound entity = spawnData.getCompoundOrEmpty("entity");
-                String entityId = entity.getString("id").orElse("");
+                if (!nbt.contains("SpawnData", 10)) return "Unknown";
+                NbtCompound spawnData = (NbtCompound) nbt.get("SpawnData");
+                if (spawnData == null || !spawnData.contains("entity", 10)) return "Unknown";
+                NbtCompound entity = (NbtCompound) spawnData.get("entity");
+                if (entity == null || !entity.contains("id")) return "Unknown";
+                String entityId = entity.getString("id");
                 if (entityId.contains(":")) entityId = entityId.split(":")[1];
                 if (!entityId.isEmpty())
                     return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
