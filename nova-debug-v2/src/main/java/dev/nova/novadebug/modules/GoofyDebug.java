@@ -1,4 +1,5 @@
 package dev.nova.novadebug.modules;
+import dev.nova.novadebug.NovaDebugAddon;
 import dev.nova.novadebug.rendering.ChunkRenderer;
 import dev.nova.novadebug.util.ChunkActivityData;
 import dev.nova.novadebug.util.ChunkPos2D;
@@ -7,7 +8,6 @@ import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
@@ -39,7 +39,7 @@ public class GoofyDebug extends Module {
     private final Setting<Double> decaySpeed=sgPerformance.add(new DoubleSetting.Builder().name("activity-decay-speed").description("Score decay rate").defaultValue(0.5).min(0.1).sliderMax(5.0).build());
     private ChunkTracker tracker;
     public GoofyDebug() {
-        super(Categories.World,"Nova Debug","Chunk-based underground activity analysis by Saint.");
+        super(NovaDebugAddon.CATEGORY,"Nova Debug","Chunk-based underground activity analysis by Saint.");
     }
     @Override public void onActivate()   { tracker=new ChunkTracker(); info("Nova Debug v2 by Saint - active."); }
     @Override public void onDeactivate() { if(tracker!=null){tracker.reset();tracker=null;} }
