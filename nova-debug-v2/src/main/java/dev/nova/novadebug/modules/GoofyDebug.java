@@ -81,13 +81,15 @@ public class GoofyDebug extends Module {
         } catch (Exception e) {
             error("Scan error: " + e.getMessage());
         }
-    }
-    private String getSpawnerType(WorldChunk chunk, BlockPos spawnerPos) {
+    }private String getSpawnerType(WorldChunk chunk, BlockPos spawnerPos) {
         try {
             BlockEntity be = chunk.getBlockEntity(spawnerPos);
             if (be instanceof MobSpawnerBlockEntity spawner) {
-                String entityId = spawner.getLogic().getSpawnEntry().getEntityNbtForClient(mc.world).map(nbt -> nbt.getString("id")).orElse("Unknown");
+                String entityId = spawner.getLogic()
+                    .getSpawnEntry(mc.world, mc.world.random, spawnerPos)
+                    .getNbt().getString("id");
                 if (entityId.contains(":")) entityId = entityId.split(":")[1];
+                if (entityId.isEmpty()) return "Unknown";
                 return entityId.substring(0, 1).toUpperCase() + entityId.substring(1).replace("_", " ");
             }
         } catch (Exception ignored) {}
