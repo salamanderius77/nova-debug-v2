@@ -9,7 +9,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.BlockPos;
@@ -22,11 +21,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GoofyDebug extends Module {
     public enum RenderStyle { Pillar, Flat }
 
-    private final SettingGroup sgSpawner  = settings.createGroup("Spawners");
-    private final SettingGroup sgCluster  = settings.createGroup("Cluster Signal");
-    private final SettingGroup sgActivity = settings.createGroup("Player Activity");
-    private final SettingGroup sgPlayers  = settings.createGroup("Players");
-    private final SettingGroup sgGeneral  = settings.createGroup("General");
+    private final SettingGroup sgSpawner = settings.createGroup("Spawners");
+    private final SettingGroup sgCluster = settings.createGroup("Cluster Signal");
+    private final SettingGroup sgPlayers = settings.createGroup("Players");
+    private final SettingGroup sgGeneral = settings.createGroup("General");
 
     // Spawner settings
     private final Setting<Boolean>      detectSpawners       = sgSpawner.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
@@ -56,26 +54,10 @@ public class GoofyDebug extends Module {
         .name("bedrock-pillar")
         .description("Extend cluster pillar from bedrock (-64) to sky (320).")
         .defaultValue(true).build());
-    // Minimum number of fully grown clusters to trigger (default 16)
     private final Setting<Integer>      clusterThreshold     = sgCluster.add(new IntSetting.Builder()
         .name("min-clusters")
         .description("Minimum number of fully grown amethyst clusters to trigger a pillar.")
         .defaultValue(16).min(1).sliderMax(64).build());
-
-    // Activity settings
-    private final Setting<Boolean>      detectActivity = sgActivity.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
-    private final Setting<SettingColor> activityFill   = sgActivity.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(255, 0, 0, 40)).build());
-    private final Setting<SettingColor> activityLine   = sgActivity.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(255, 0, 0, 200)).build());
-    private final Setting<RenderStyle>  activityStyle  = sgActivity.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean>      activityToast  = sgActivity.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
-    // Sensitivity: 1 = default (needs many blocks), 30 = very sensitive (needs few blocks)
-    // At sensitivity 1  → threshold = 60 blocks needed
-    // At sensitivity 15 → threshold = ~30 blocks needed
-    // At sensitivity 30 → threshold = 2 blocks needed
-    private final Setting<Integer>      activitySensitivity = sgActivity.add(new IntSetting.Builder()
-        .name("sensitivity")
-        .description("How sensitive the activity detection is. 1 = low (needs many player blocks), 30 = very high (triggers on almost anything).")
-        .defaultValue(1).min(1).sliderMax(30).build());
 
     // Player settings
     private final Setting<Boolean>      detectPlayers       = sgPlayers.add(new BoolSetting.Builder().name("enabled").defaultValue(true).build());
@@ -103,56 +85,7 @@ public class GoofyDebug extends Module {
         .description("Chunks you must move before highlights clear. 0 = never clear.")
         .defaultValue(26).min(0).sliderMax(32).build());
 
-    // Activity blocks — things players place underground
-    private static final Set<Block> ACTIVITY_BLOCKS = new HashSet<>(Arrays.asList(
-        Blocks.CHEST, Blocks.TRAPPED_CHEST, Blocks.FURNACE, Blocks.CRAFTING_TABLE,
-        Blocks.TORCH, Blocks.WALL_TORCH, Blocks.LADDER, Blocks.OAK_PLANKS,
-        Blocks.SPRUCE_PLANKS, Blocks.BIRCH_PLANKS, Blocks.JUNGLE_PLANKS,
-        Blocks.ACACIA_PLANKS, Blocks.DARK_OAK_PLANKS, Blocks.MANGROVE_PLANKS,
-        Blocks.CHERRY_PLANKS, Blocks.BAMBOO_PLANKS, Blocks.STONE_BRICKS,
-        Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS,
-        Blocks.OAK_LOG, Blocks.SPRUCE_LOG, Blocks.BIRCH_LOG,
-        Blocks.COBBLESTONE, Blocks.MOSSY_COBBLESTONE,
-        Blocks.IRON_DOOR, Blocks.OAK_DOOR, Blocks.SPRUCE_DOOR,
-        Blocks.OAK_FENCE, Blocks.SPRUCE_FENCE, Blocks.COBBLESTONE_WALL,
-        Blocks.GLOWSTONE, Blocks.SEA_LANTERN, Blocks.LANTERN,
-        Blocks.SOUL_LANTERN, Blocks.SHROOMLIGHT, Blocks.JACK_O_LANTERN,
-        Blocks.HOPPER, Blocks.DROPPER, Blocks.DISPENSER, Blocks.OBSERVER,
-        Blocks.PISTON, Blocks.STICKY_PISTON, Blocks.TNT,
-        Blocks.ENCHANTING_TABLE, Blocks.ANVIL, Blocks.CHIPPED_ANVIL,
-        Blocks.BREWING_STAND, Blocks.CAULDRON, Blocks.BARREL,
-        Blocks.BLAST_FURNACE, Blocks.SMOKER, Blocks.CAMPFIRE,
-        Blocks.SOUL_CAMPFIRE, Blocks.LOOM, Blocks.CARTOGRAPHY_TABLE,
-        Blocks.FLETCHING_TABLE, Blocks.SMITHING_TABLE, Blocks.GRINDSTONE,
-        Blocks.STONECUTTER, Blocks.COMPOSTER, Blocks.BEE_NEST,
-        Blocks.BEEHIVE, Blocks.BOOKSHELF, Blocks.LECTERN,
-        Blocks.NOTE_BLOCK, Blocks.JUKEBOX, Blocks.DAYLIGHT_DETECTOR,
-        Blocks.TRIPWIRE_HOOK, Blocks.LEVER, Blocks.STONE_BUTTON,
-        Blocks.OAK_BUTTON, Blocks.STONE_PRESSURE_PLATE,
-        Blocks.OAK_PRESSURE_PLATE, Blocks.REDSTONE_WIRE,
-        Blocks.REDSTONE_TORCH, Blocks.REDSTONE_WALL_TORCH,
-        Blocks.REPEATER, Blocks.COMPARATOR, Blocks.REDSTONE_LAMP,
-        Blocks.TARGET, Blocks.RAIL, Blocks.POWERED_RAIL,
-        Blocks.DETECTOR_RAIL, Blocks.ACTIVATOR_RAIL,
-        Blocks.WHITE_WOOL, Blocks.ORANGE_WOOL, Blocks.MAGENTA_WOOL,
-        Blocks.LIGHT_BLUE_WOOL, Blocks.YELLOW_WOOL, Blocks.LIME_WOOL,
-        Blocks.PINK_WOOL, Blocks.GRAY_WOOL, Blocks.LIGHT_GRAY_WOOL,
-        Blocks.CYAN_WOOL, Blocks.PURPLE_WOOL, Blocks.BLUE_WOOL,
-        Blocks.BROWN_WOOL, Blocks.GREEN_WOOL, Blocks.RED_WOOL, Blocks.BLACK_WOOL,
-        Blocks.WHITE_CARPET, Blocks.ORANGE_CARPET, Blocks.YELLOW_CARPET,
-        Blocks.WHITE_BED, Blocks.ORANGE_BED, Blocks.RED_BED,
-        Blocks.ENDER_CHEST, Blocks.SHULKER_BOX,
-        Blocks.WHITE_SHULKER_BOX, Blocks.ORANGE_SHULKER_BOX,
-        Blocks.MAGENTA_SHULKER_BOX, Blocks.LIGHT_BLUE_SHULKER_BOX,
-        Blocks.YELLOW_SHULKER_BOX, Blocks.LIME_SHULKER_BOX,
-        Blocks.PINK_SHULKER_BOX, Blocks.GRAY_SHULKER_BOX,
-        Blocks.LIGHT_GRAY_SHULKER_BOX, Blocks.CYAN_SHULKER_BOX,
-        Blocks.PURPLE_SHULKER_BOX, Blocks.BLUE_SHULKER_BOX,
-        Blocks.BROWN_SHULKER_BOX, Blocks.GREEN_SHULKER_BOX,
-        Blocks.RED_SHULKER_BOX, Blocks.BLACK_SHULKER_BOX
-    ));
-
-    private enum ChunkType { PLAYER, SPAWNER, CLUSTER, ACTIVITY }
+    private enum ChunkType { PLAYER, SPAWNER, CLUSTER }
 
     private final ConcurrentHashMap<ChunkPos, ChunkType> trackedChunks  = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean>   notifiedChunks = new ConcurrentHashMap<>();
@@ -175,10 +108,10 @@ public class GoofyDebug extends Module {
         notifiedChunks.clear();
         scannedChunks.clear();
         scanQueue.clear();
-        scanIndex        = 0;
-        scanDone         = false;
-        scanOriginChunk  = null;
-        renderSnapshot   = Collections.emptyMap();
+        scanIndex       = 0;
+        scanDone        = false;
+        scanOriginChunk = null;
+        renderSnapshot  = Collections.emptyMap();
         buildScanQueue();
         info("Nova Debug active.");
     }
@@ -212,16 +145,6 @@ public class GoofyDebug extends Module {
         all.sort(Comparator.comparingInt(p ->
             Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
         scanQueue.addAll(all);
-    }
-
-    // Convert sensitivity (1-30) to a block count threshold.
-    // sensitivity 1  → need 60 blocks  (very low, almost never triggers)
-    // sensitivity 15 → need ~30 blocks  (medium)
-    // sensitivity 30 → need 2 blocks    (triggers on almost anything)
-    private int getActivityThreshold() {
-        int s = activitySensitivity.get(); // 1 to 30
-        // Linear interpolation: sens=1 → 60, sens=30 → 2
-        return Math.max(2, 60 - (int) Math.round((s - 1) * (58.0 / 29.0)));
     }
 
     private void scanChunk(ChunkPos pos) {
@@ -281,11 +204,8 @@ public class GoofyDebug extends Module {
                         boolean isNew = existing != ChunkType.SPAWNER;
                         trackedChunks.put(pos, ChunkType.SPAWNER);
                         if (isNew && spawnerToast.get() && !notifiedChunks.containsKey(pos)) {
-                            if (spawnerCount == 1) {
-                                info("§9[Nova Debug] §fSpawner §9found!");
-                            } else {
-                                info("§9[Nova Debug] §f" + spawnerCount + " §9Spawners found!");
-                            }
+                            if (spawnerCount == 1) info("§9[Nova Debug] §fSpawner §9found!");
+                            else info("§9[Nova Debug] §f" + spawnerCount + " §9Spawners found!");
                             notifiedChunks.put(pos, Boolean.TRUE);
                         }
                     }
@@ -304,8 +224,6 @@ public class GoofyDebug extends Module {
                         for (int y = bottomY; y < topY; y++) {
                             try {
                                 BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
-                                // AMETHYST_CLUSTER is the fully grown stage only
-                                // (SMALL_AMETHYST_BUD, MEDIUM_AMETHYST_BUD, LARGE_AMETHYST_BUD are excluded)
                                 if (chunk.getBlockState(bp).isOf(Blocks.AMETHYST_CLUSTER)) {
                                     clusterCount++;
                                 }
@@ -321,45 +239,6 @@ public class GoofyDebug extends Module {
                         trackedChunks.put(pos, ChunkType.CLUSTER);
                         if (isNew && clusterToast.get() && !notifiedChunks.containsKey(pos)) {
                             info("§5[Nova Debug] §f" + clusterCount + " §5Amethyst Clusters found!");
-                            notifiedChunks.put(pos, Boolean.TRUE);
-                        }
-                    }
-                    return;
-                }
-            }
-
-            // --- ACTIVITY (lowest priority) ---
-            // Uses sensitivity to determine how many player-placed blocks are needed.
-            if (detectActivity.get()) {
-                int activityCount = 0;
-                int threshold     = getActivityThreshold();
-                int bottomY       = mc.world.getBottomY();
-
-                for (int lx = 0; lx < 16; lx++) {
-                    for (int lz = 0; lz < 16; lz++) {
-                        for (int y = bottomY; y < 64; y++) {
-                            try {
-                                BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
-                                Block block = chunk.getBlockState(bp).getBlock();
-                                if (ACTIVITY_BLOCKS.contains(block)) {
-                                    activityCount++;
-                                    // Early exit once threshold reached
-                                    if (activityCount >= threshold) break;
-                                }
-                            } catch (Exception ignored) {}
-                        }
-                        if (activityCount >= threshold) break;
-                    }
-                    if (activityCount >= threshold) break;
-                }
-
-                if (activityCount >= threshold) {
-                    ChunkType existing = trackedChunks.get(pos);
-                    if (existing != ChunkType.PLAYER && existing != ChunkType.SPAWNER && existing != ChunkType.CLUSTER) {
-                        boolean isNew = existing != ChunkType.ACTIVITY;
-                        trackedChunks.put(pos, ChunkType.ACTIVITY);
-                        if (isNew && activityToast.get() && !notifiedChunks.containsKey(pos)) {
-                            info("§c[Nova Debug] Player Activity §ffound! (§c" + activityCount + " §fblocks)");
                             notifiedChunks.put(pos, Boolean.TRUE);
                         }
                     }
@@ -509,18 +388,11 @@ public class GoofyDebug extends Module {
                         style = clusterStyle.get();
                         yMax  = clusterBedrockPillar.get() ? 320 : 64;
                     }
-                    case PLAYER -> {
+                    default -> { // PLAYER
                         fill  = c(playerFill.get());
                         line  = c(playerLine.get());
                         style = playerStyle.get();
                         yMax  = playerBedrockPillar.get() ? 320 : 64;
-                    }
-                    default -> {
-                        // Activity — always underground only, no bedrock pillar
-                        fill  = c(activityFill.get());
-                        line  = c(activityLine.get());
-                        style = activityStyle.get();
-                        yMax  = 64;
                     }
                 }
 
