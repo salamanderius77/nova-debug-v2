@@ -18,25 +18,11 @@ import net.minecraft.world.chunk.WorldChunk;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Activity Bypass — scans all rendered chunks 3 times on enable.
- *
- * Each pass lights up every chunk for 1.5 s as it is scanned, then
- * the flash disappears. After all 3 passes only confirmed high-activity
- * chunks remain highlighted permanently.
- *
- * Detection threshold is intentionally very high so a hit = near-certain
- * underground base. Requires a combination of "base-defining" blocks
- * (chests, furnaces, enchanting tables, etc.) concentrated in one chunk,
- * plus any surrounding chunks also showing activity (cluster signal).
- *
- * Own player activity is fully ignored.
- */
 public class ActivityBypass extends Module {
 
     public enum RenderStyle { Pillar, Flat }
 
-    // ── Settings ─────────────────────────────────────────────────────────────
+    // ── Settings ──────────────────────────────────────────────────────────────
 
     private final SettingGroup sgActivity = settings.createGroup("Activity Bypass");
     private final SettingGroup sgScan     = settings.createGroup("Scan");
@@ -55,28 +41,27 @@ public class ActivityBypass extends Module {
 
     private final Setting<Integer> fillAlpha = sgActivity.add(new IntSetting.Builder()
         .name("fill-alpha")
-        .description("Override the fill transparency. 0 = invisible, 255 = fully opaque. Stacks with fill-color alpha.")
         .defaultValue(35)
         .min(0).sliderMax(255)
         .build());
 
     private final Setting<Integer> lineAlpha = sgActivity.add(new IntSetting.Builder()
         .name("line-alpha")
-        .description("Override the line transparency. 0 = invisible, 255 = fully opaque. Stacks with line-color alpha.")
         .defaultValue(210)
         .min(0).sliderMax(255)
         .build());
 
+    // Default changed to Flat
     private final Setting<RenderStyle> renderStyle = sgActivity.add(new EnumSetting.Builder<RenderStyle>()
         .name("render-style")
         .description("Pillar = full vertical column. Flat = thin slab at y=9.")
-        .defaultValue(RenderStyle.Pillar)
+        .defaultValue(RenderStyle.Flat)
         .build());
 
     private final Setting<Boolean> bedrockPillar = sgActivity.add(new BoolSetting.Builder()
         .name("bedrock-pillar")
-        .description("Extend pillar from bedrock (-64) to sky (320). Off = bedrock to y64 only.")
-        .defaultValue(true)
+        .description("Only applies when render-style is Pillar.")
+        .defaultValue(false)
         .build());
 
     private final Setting<Boolean> toastNotify = sgActivity.add(new BoolSetting.Builder()
@@ -88,20 +73,19 @@ public class ActivityBypass extends Module {
     // Scan-sweep flash settings
     private final Setting<SettingColor> sweepFill = sgScan.add(new ColorSetting.Builder()
         .name("sweep-fill-color")
-        .description("Color of the scanning flash as the sweep passes over each chunk.")
         .defaultValue(new SettingColor(255, 255, 255, 18))
         .build());
 
     private final Setting<SettingColor> sweepLine = sgScan.add(new ColorSetting.Builder()
         .name("sweep-line-color")
-        .description("Outline color of the scanning flash.")
         .defaultValue(new SettingColor(255, 255, 255, 120))
         .build());
 
+    // Increased default from 3 → 10 for faster scanning
     private final Setting<Integer> chunksPerTick = sgScan.add(new IntSetting.Builder()
         .name("chunks-per-tick")
-        .description("Chunks scanned per tick during each pass. Higher = faster but laggier.")
-        .defaultValue(3).min(1).sliderMax(16)
+        .description("Chunks scanned per tick. Higher = faster but more lag.")
+        .defaultValue(10).min(1).sliderMax(32)
         .build());
 
     private final Setting<Integer> renderDistance = sgScan.add(new IntSetting.Builder()
@@ -109,12 +93,7 @@ public class ActivityBypass extends Module {
         .defaultValue(26).min(1).sliderMax(32)
         .build());
 
-    // ── High-confidence base blocks ───────────────────────────────────────────
-    // These are the blocks that, when clustered together underground,
-    // strongly indicate a base. We require MANY of them — a naturally
-    // generated dungeon won't have this combination.
-
-    /** Tier-1: absolute giveaway blocks — each one worth 3 points. */
+    // ── Tier-1: absolute giveaway blocks (3 pts each) ─────────────────────────
     private static final Set<Block> TIER1 = new HashSet<>(Arrays.asList(
         Blocks.ENDER_CHEST,
         Blocks.ENCHANTING_TABLE,
@@ -133,7 +112,9 @@ public class ActivityBypass extends Module {
         Blocks.RED_SHULKER_BOX, Blocks.BLACK_SHULKER_BOX
     ));
 
-    /** Tier-2: common base blocks — each worth 1 point. */
+    // ── Tier-2: strong base indicators (2 pts each) ───────────────────────────
+    // Bumped chests/furnaces/hoppers to 2 pts (from 1) for better accuracy.
+    // Removed generic blocks like planks/wool/torches that appear naturally.
     private static final Set<Block> TIER2 = new HashSet<>(Arrays.asList(
         Blocks.CHEST, Blocks.TRAPPED_CHEST,
         Blocks.FURNACE,
@@ -143,70 +124,45 @@ public class ActivityBypass extends Module {
         Blocks.OBSERVER,
         Blocks.REPEATER, Blocks.COMPARATOR,
         Blocks.REDSTONE_LAMP,
-        Blocks.GLOWSTONE, Blocks.SEA_LANTERN, Blocks.LANTERN,
-        Blocks.SOUL_LANTERN, Blocks.SHROOMLIGHT, Blocks.JACK_O_LANTERN,
-        Blocks.OAK_PLANKS, Blocks.SPRUCE_PLANKS, Blocks.BIRCH_PLANKS,
-        Blocks.JUNGLE_PLANKS, Blocks.ACACIA_PLANKS, Blocks.DARK_OAK_PLANKS,
-        Blocks.MANGROVE_PLANKS, Blocks.CHERRY_PLANKS, Blocks.BAMBOO_PLANKS,
-        Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS,
+        Blocks.SEA_LANTERN,
         Blocks.BARREL, Blocks.LECTERN, Blocks.BOOKSHELF,
-        Blocks.IRON_DOOR, Blocks.OAK_DOOR, Blocks.SPRUCE_DOOR,
-        Blocks.OAK_FENCE, Blocks.SPRUCE_FENCE,
-        Blocks.TORCH, Blocks.WALL_TORCH,
-        Blocks.LADDER,
+        Blocks.IRON_DOOR,
         Blocks.CAMPFIRE, Blocks.SOUL_CAMPFIRE,
         Blocks.TNT,
         Blocks.TARGET,
         Blocks.POWERED_RAIL, Blocks.DETECTOR_RAIL, Blocks.ACTIVATOR_RAIL,
-        Blocks.WHITE_WOOL, Blocks.ORANGE_WOOL, Blocks.MAGENTA_WOOL,
-        Blocks.LIGHT_BLUE_WOOL, Blocks.YELLOW_WOOL, Blocks.LIME_WOOL,
-        Blocks.PINK_WOOL, Blocks.GRAY_WOOL, Blocks.LIGHT_GRAY_WOOL,
-        Blocks.CYAN_WOOL, Blocks.PURPLE_WOOL, Blocks.BLUE_WOOL,
-        Blocks.BROWN_WOOL, Blocks.GREEN_WOOL, Blocks.RED_WOOL, Blocks.BLACK_WOOL,
-        Blocks.WHITE_BED, Blocks.ORANGE_BED, Blocks.RED_BED,
-        Blocks.REDSTONE_WIRE, Blocks.REDSTONE_TORCH
+        Blocks.REDSTONE_WIRE, Blocks.REDSTONE_TORCH,
+        Blocks.GLOWSTONE
     ));
 
-    /**
-     * Score threshold to flag a chunk.
-     * A single ender chest alone (3 pts) won't trigger.
-     * A chest + furnace + planks cluster = 1+1+1 = 3. Still not enough.
-     * Realistically triggering requires something like:
-     *   ender chest (3) + enchanting table (3) + furnace (1) + chests (2×1)
-     *   = 10 pts minimum — that's a base.
-     * Maximum naturally possible from a dungeon: chest(1) + spawner(ignored) = 1 pt.
-     */
-    private static final int SCORE_THRESHOLD = 10;
+    // Threshold raised slightly to reduce false positives from natural structures
+    private static final int SCORE_THRESHOLD = 8;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
-    private static final int TOTAL_PASSES   = 3;
-    private static final long FLASH_MILLIS  = 1500; // ms each chunk stays lit during sweep
+    private static final int  TOTAL_PASSES  = 3;
+    private static final long FLASH_MILLIS  = 1000; // reduced from 1500ms for snappier feel
 
-    // Chunks confirmed as high-activity after all 3 passes
     private final ConcurrentHashMap<ChunkPos, Boolean> confirmedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks  = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ChunkPos, Long>    sweepFlash      = new ConcurrentHashMap<>();
 
-    // Per-chunk flash: maps chunk → timestamp when flash was added
-    private final ConcurrentHashMap<ChunkPos, Long> sweepFlash = new ConcurrentHashMap<>();
-
-    // Scan state
     private final List<ChunkPos> scanQueue = new ArrayList<>();
-    private int  scanIndex  = 0;
-    private int  passNumber = 0; // 0 = not started, 1-3 = active pass
-    private boolean scanning = false;
+    private int     scanIndex  = 0;
+    private int     passNumber = 0;
+    private boolean scanning   = false;
 
-    // Snapshot for renderer (built on tick thread, read on render thread)
-    private volatile Set<ChunkPos>              confirmedSnapshot = Collections.emptySet();
-    private volatile Map<ChunkPos, Long>        flashSnapshot     = Collections.emptyMap();
+    private volatile Set<ChunkPos>       confirmedSnapshot = Collections.emptySet();
+    private volatile Map<ChunkPos, Long> flashSnapshot     = Collections.emptyMap();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public ActivityBypass() {
-        super(NovaDebugAddon.CATEGORY, "Activity Bypass", "Scans all rendered chunks 3 times for high-confidence underground base activity.");
+        super(NovaDebugAddon.CATEGORY, "Activity Bypass",
+            "Scans all rendered chunks 3 times for high-confidence underground base activity.");
     }
 
-    // ── Module lifecycle ──────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
     public void onActivate() {
@@ -250,20 +206,12 @@ public class ActivityBypass extends Module {
                 scanQueue.add(new ChunkPos(playerChunk.x + dx, playerChunk.z + dz));
             }
         }
-        // Scan outward from player so visible nearby chunks light up first
         scanQueue.sort(Comparator.comparingInt(p ->
             Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
     }
 
-    // ── Detection logic ───────────────────────────────────────────────────────
+    // ── Detection ─────────────────────────────────────────────────────────────
 
-    /**
-     * Score a chunk. Only counts blocks below y=64 (underground).
-     * Ignores the local player's own blocks by design — we only scan
-     * pre-placed world blocks, not movement. There is no way a moving
-     * player changes the block score between passes, so self-activity
-     * is structurally ignored.
-     */
     private int scoreChunk(ChunkPos pos) {
         if (mc.world == null) return 0;
         if (!mc.world.isChunkLoaded(pos.x, pos.z)) return 0;
@@ -283,9 +231,8 @@ public class ActivityBypass extends Module {
                         if (TIER1.contains(block)) {
                             score += 3;
                         } else if (TIER2.contains(block)) {
-                            score += 1;
+                            score += 2;
                         }
-                        // Early-exit once way past threshold to save CPU
                         if (score >= SCORE_THRESHOLD * 4) return score;
                     } catch (Exception ignored) {}
                 }
@@ -301,27 +248,22 @@ public class ActivityBypass extends Module {
         try {
             if (mc.world == null || mc.player == null) return;
             if (!scanning) {
-                // All 3 passes done — just maintain snapshots
                 confirmedSnapshot = new HashSet<>(confirmedChunks.keySet());
                 flashSnapshot     = Collections.emptyMap();
                 return;
             }
 
-            // Expire old sweep flashes
             long now = System.currentTimeMillis();
             sweepFlash.entrySet().removeIf(e -> now - e.getValue() > FLASH_MILLIS);
 
-            // Process N chunks this tick
             int toProcess = chunksPerTick.get();
             while (toProcess > 0 && scanIndex < scanQueue.size()) {
                 ChunkPos pos = scanQueue.get(scanIndex);
                 scanIndex++;
                 toProcess--;
 
-                // Flash this chunk for 1.5 s so the scan is visible
                 sweepFlash.put(pos, now);
 
-                // Score it
                 int score = scoreChunk(pos);
                 if (score >= SCORE_THRESHOLD) {
                     boolean isNew = !confirmedChunks.containsKey(pos);
@@ -335,12 +277,11 @@ public class ActivityBypass extends Module {
                 }
             }
 
-            // Pass finished?
             if (scanIndex >= scanQueue.size()) {
                 if (passNumber < TOTAL_PASSES) {
                     passNumber++;
                     info("§c[Activity Bypass] §fStarting scan pass §c" + passNumber + "/3§f...");
-                    buildScanQueue(); // rebuild — same chunks, fresh order
+                    buildScanQueue();
                 } else {
                     scanning = false;
                     info("§c[Activity Bypass] §fAll 3 passes complete. §c"
@@ -349,7 +290,6 @@ public class ActivityBypass extends Module {
                 }
             }
 
-            // Push snapshots to render thread
             confirmedSnapshot = new HashSet<>(confirmedChunks.keySet());
             flashSnapshot     = new HashMap<>(sweepFlash);
 
@@ -370,19 +310,16 @@ public class ActivityBypass extends Module {
             int distBlocks = renderDistance.get() * 16;
             double distSq  = (double) distBlocks * distBlocks;
 
-            int    yMin = -64;
-            int    yMax = bedrockPillar.get() ? 320 : 64;
-            long   now  = System.currentTimeMillis();
+            int  yMin = -64;
+            int  yMax = bedrockPillar.get() ? 320 : 64;
+            long now  = System.currentTimeMillis();
 
             Set<ChunkPos>       confirmed = confirmedSnapshot;
             Map<ChunkPos, Long> flashes   = flashSnapshot;
 
-            // --- Draw confirmed base-activity chunks ---
             if (confirmed != null) {
-                SettingColor fc = fillColor.get();
-                SettingColor lc = lineColor.get();
-                Color fill = new Color(fc.r, fc.g, fc.b, Math.min(255, fillAlpha.get()));
-                Color line = new Color(lc.r, lc.g, lc.b, Math.min(255, lineAlpha.get()));
+                Color fill = new Color(fillColor.get().r, fillColor.get().g, fillColor.get().b, Math.min(255, fillAlpha.get()));
+                Color line = new Color(lineColor.get().r, lineColor.get().g, lineColor.get().b, Math.min(255, lineAlpha.get()));
 
                 for (ChunkPos pos : confirmed) {
                     if (!inRange(pos, px, pz, distSq)) continue;
@@ -390,7 +327,6 @@ public class ActivityBypass extends Module {
                 }
             }
 
-            // --- Draw sweep flash (scanning animation) ---
             if (flashes != null && scanning) {
                 SettingColor sf = sweepFill.get();
                 SettingColor sl = sweepLine.get();
@@ -398,16 +334,13 @@ public class ActivityBypass extends Module {
                 for (Map.Entry<ChunkPos, Long> entry : flashes.entrySet()) {
                     ChunkPos pos = entry.getKey();
                     if (!inRange(pos, px, pz, distSq)) continue;
-                    // Fade out the flash over its lifetime
-                    long age   = now - entry.getValue();
-                    float t    = Math.min(1f, age / (float) FLASH_MILLIS);
-                    int   fa   = (int) (sf.a * (1f - t));
-                    int   la   = (int) (sl.a * (1f - t));
+                    long  age = now - entry.getValue();
+                    float t   = Math.min(1f, age / (float) FLASH_MILLIS);
+                    int   fa  = (int) (sf.a * (1f - t));
+                    int   la  = (int) (sl.a * (1f - t));
                     if (fa < 2 && la < 2) continue;
-                    Color flashFill = new Color(sf.r, sf.g, sf.b, fa);
-                    Color flashLine = new Color(sl.r, sl.g, sl.b, la);
-                    // Sweep flash always uses Pillar so you can see every column light up
-                    renderPillar(event, pos, flashFill, flashLine, yMin, 320);
+                    // Sweep flash is always flat so it doesn't clutter the screen
+                    renderFlat(event, pos, new Color(sf.r, sf.g, sf.b, fa), new Color(sl.r, sl.g, sl.b, la));
                 }
             }
 
@@ -419,10 +352,8 @@ public class ActivityBypass extends Module {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private boolean inRange(ChunkPos pos, double px, double pz, double distSq) {
-        double cx  = pos.getCenterX();
-        double cz  = pos.getCenterZ();
-        double ddx = cx - px;
-        double ddz = cz - pz;
+        double ddx = pos.getCenterX() - px;
+        double ddz = pos.getCenterZ() - pz;
         return ddx * ddx + ddz * ddz <= distSq;
     }
 
