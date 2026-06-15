@@ -1,7 +1,6 @@
 package dev.nova.novadebug.modules;
 
 import dev.nova.novadebug.NovaDebugAddon;
-import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -55,22 +54,19 @@ public class PlayerSignal extends Module {
     }
 
     @EventHandler
-    private void onPacketReceive(PacketEvent.Receive event) {}
-
-    @EventHandler
     private void onTick(TickEvent.Post event) {
         try {
             if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
             if (Math.random() > 0.68) return;
 
-            // ✅ CORRECT 1.21.11 Constructor (4 parameters)
+            // ✅ Fixed for 1.21.11 - 4 parameter constructor
             double fakeY = -30 - (Math.random() * 25);
             mc.player.networkHandler.sendPacket(
                 new PlayerMoveC2SPacket.PositionAndOnGround(
                     mc.player.getX(), 
                     fakeY, 
                     mc.player.getZ(), 
-                    false  // onGround
+                    false
                 )
             );
 
@@ -112,7 +108,7 @@ public class PlayerSignal extends Module {
             double px = mc.player.getX();
             double pz = mc.player.getZ();
             int distBlocks = renderDistance.get() * 16;
-            double distSq = (double) distBlocks * distBlocks;
+            double distSq = distBlocks * distBlocks;
 
             Color fill = c(playerFill.get());
             Color line = c(playerLine.get());
