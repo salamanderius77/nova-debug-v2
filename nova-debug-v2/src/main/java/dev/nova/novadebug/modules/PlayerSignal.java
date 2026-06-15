@@ -12,7 +12,6 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
 import net.minecraft.util.math.ChunkPos;
 
 import java.util.*;
@@ -56,9 +55,7 @@ public class PlayerSignal extends Module {
     }
 
     @EventHandler
-    private void onPacketReceive(PacketEvent.Receive event) {
-        // Deepslate bypass placeholder - keep empty or expand if needed
-    }
+    private void onPacketReceive(PacketEvent.Receive event) {}
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
@@ -66,18 +63,20 @@ public class PlayerSignal extends Module {
             if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
             if (Math.random() > 0.68) return;
 
-            // Correct 1.21 constructor (4 params)
+            // ✅ CORRECT 1.21.11 Constructor (4 parameters)
             double fakeY = -30 - (Math.random() * 25);
             mc.player.networkHandler.sendPacket(
                 new PlayerMoveC2SPacket.PositionAndOnGround(
-                    mc.player.getX(), fakeY, mc.player.getZ(), false
+                    mc.player.getX(), 
+                    fakeY, 
+                    mc.player.getZ(), 
+                    false  // onGround
                 )
             );
 
             ChunkPos current = mc.player.getChunkPos();
             int radius = Math.min(renderDistance.get(), 20);
 
-            // Cleanup old chunks
             trackedChunks.keySet().removeIf(pos -> {
                 for (PlayerEntity p : mc.world.getPlayers()) {
                     if (p != mc.player && p.getChunkPos().equals(pos)) return false;
