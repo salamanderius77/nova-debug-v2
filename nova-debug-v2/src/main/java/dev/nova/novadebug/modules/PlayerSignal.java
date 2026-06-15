@@ -72,6 +72,7 @@ public class PlayerSignal extends Module {
                 if (players != null) {
                     for (PlayerEntity p : players) {
                         if (p == null || p == mc.player) continue;
+                        if (p.getY() > -1) continue;
                         ChunkPos pc = p.getChunkPos();
                         if (pc.x == pos.x && pc.z == pos.z) { found = true; break; }
                     }
@@ -87,6 +88,7 @@ public class PlayerSignal extends Module {
             if (players != null) {
                 for (PlayerEntity p : players) {
                     if (p == null || p == mc.player) continue;
+                    if (p.getY() > -1) continue;
                     ChunkPos pos = p.getChunkPos();
                     if (Math.abs(pos.x - currentChunk.x) > radius) continue;
                     if (Math.abs(pos.z - currentChunk.z) > radius) continue;
