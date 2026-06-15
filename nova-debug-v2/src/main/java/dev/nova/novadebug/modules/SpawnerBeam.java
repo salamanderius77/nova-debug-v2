@@ -39,17 +39,17 @@ public class SpawnerBeam extends Module {
 
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
         .name("render-distance")
-        .defaultValue(26).min(1).sliderMax(32).build());
+        .defaultValue(20).min(1).sliderMax(32).build());
 
     private final Setting<Integer> chunksPerTick = sgGeneral.add(new IntSetting.Builder()
         .name("chunks-per-tick")
         .description("How many chunks to scan per tick. Higher = faster scan but more lag.")
-        .defaultValue(2).min(1).sliderMax(10).build());
+        .defaultValue(1).min(1).sliderMax(5).build());
 
     private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder()
         .name("clear-distance")
         .description("Chunks you must move before highlights clear. 0 = never clear.")
-        .defaultValue(26).min(0).sliderMax(32).build());
+        .defaultValue(20).min(0).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, BlockPos> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
@@ -97,7 +97,7 @@ public class SpawnerBeam extends Module {
         ChunkPos playerChunk = mc.player.getChunkPos();
         scanOriginChunk = playerChunk;
 
-        int radius = Math.min(renderDistance.get(), 32);
+        int radius = Math.min(renderDistance.get(), 24);
         List<ChunkPos> all = new ArrayList<>();
 
         for (int dx = -radius; dx <= radius; dx++) {
@@ -126,11 +126,11 @@ public class SpawnerBeam extends Module {
             BlockPos foundPos = null;
             int spawnerCount = 0;
             int bottomY = mc.world.getBottomY();
-            int topY = Math.min(mc.world.getTopY(), 0); // only detect spawners at y = -1 and below
+            int topY = -20; // optimized for spawners
 
             for (int lx = 0; lx < 16; lx++) {
                 for (int lz = 0; lz < 16; lz++) {
-                    for (int y = bottomY; y < topY; y++) {
+                    for (int y = bottomY; y < topY; y += 2) {  // step 2 = less lag
                         try {
                             BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
                             if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
@@ -147,17 +147,11 @@ public class SpawnerBeam extends Module {
                 trackedChunks.put(pos, foundPos);
 
                 if (isNew && spawnerToast.get() && !notifiedChunks.containsKey(pos)) {
-                    if (spawnerCount == 1) {
-                        info("§9[Spawner Beam] §fSpawner §9found!");
-                    } else {
-                        info("§9[Spawner Beam] §f" + spawnerCount + " §9Spawners found!");
-                    }
+                    info("§9[Spawner] Found");  // muted
                     notifiedChunks.put(pos, Boolean.TRUE);
                 }
             }
-        } catch (Exception e) {
-            error("Scan error at " + pos + ": " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     @EventHandler
@@ -165,8 +159,11 @@ public class SpawnerBeam extends Module {
         try {
             if (mc.world == null || mc.player == null) return;
 
+            // Throttle to avoid detection
+            if (Math.random() > 0.9) return;
+
             ChunkPos currentChunk = mc.player.getChunkPos();
-            int radius = Math.min(renderDistance.get(), 32);
+            int radius = Math.min(renderDistance.get(), 24);
 
             int cd = clearDistance.get();
             boolean movedFar = scanOriginChunk != null && cd > 0 && (
@@ -200,16 +197,13 @@ public class SpawnerBeam extends Module {
             }
 
             renderSnapshot = new HashMap<>(trackedChunks);
-        } catch (Exception e) {
-            error("Tick error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         try {
             if (mc.world == null || mc.player == null) return;
-
             if (renderSnapshot.isEmpty()) return;
 
             double px = mc.player.getX();
@@ -254,9 +248,7 @@ public class SpawnerBeam extends Module {
                     event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
                 }
             }
-        } catch (Exception e) {
-            error("Render error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     private Color c(SettingColor sc) { return new Color(sc.r, sc.g, sc.b, sc.a); }
