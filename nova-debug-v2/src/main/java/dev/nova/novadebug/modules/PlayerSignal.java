@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import meteordevelopment.meteorclient.utils.render.RenderUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.ChunkPos;
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PlayerSignal extends Module {
 
-    public enum RenderStyle { Pillar, Flat }
+    public enum RenderStyle { Pillar, Flat, Beam }
 
     private final SettingGroup sgPlayers = settings.createGroup("Players");
     private final SettingGroup sgGeneral = settings.createGroup("General");
@@ -25,7 +26,7 @@ public class PlayerSignal extends Module {
     private final Setting<SettingColor> playerFill = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
     private final Setting<SettingColor> playerLine = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
     private final Setting<RenderStyle> playerStyle = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean> playerToast = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(false).build());
+    private final Setting<Boolean> saintNotifier = sgPlayers.add(new BoolSetting.Builder().name("saint-notifier").description("Shows a HUD toast notification when a player is detected.").defaultValue(false).build());
     private final Setting<Boolean> playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
 
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(18).min(1).sliderMax(32).build());
@@ -74,8 +75,11 @@ public class PlayerSignal extends Module {
 
                 if (!trackedChunks.containsKey(pos)) {
                     trackedChunks.put(pos, true);
-                    if (playerToast.get() && !notifiedChunks.containsKey(pos)) {
-                        info("§d[Player Signal] Player found");
+                    if (saintNotifier.get() && !notifiedChunks.containsKey(pos)) {
+                        int bx = (int) Math.floor(p.getX());
+                        int by = (int) Math.floor(p.getY());
+                        int bz = (int) Math.floor(p.getZ());
+                        RenderUtils.addToast(p.getName().getString(), "X: " + bx + " Y: " + by + " Z: " + bz);
                         notifiedChunks.put(pos, true);
                     }
                 }
@@ -113,6 +117,8 @@ public class PlayerSignal extends Module {
 
                 if (style == RenderStyle.Pillar) {
                     event.renderer.box(x1, yMin, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
+                } else if (style == RenderStyle.Beam) {
+                    event.renderer.box(x1, -64, z1, x2, 320, z2, fill, line, ShapeMode.Both, 0);
                 } else {
                     event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
                 }
