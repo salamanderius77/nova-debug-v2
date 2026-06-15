@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class SpawnerBeam extends Module {
 
-    public enum RenderStyle { Pillar, Flat }
+    public enum RenderStyle { Pillar, Flat, Beam }
 
     private final SettingGroup sgSpawner = settings.createGroup("Spawners");
     private final SettingGroup sgGeneral = settings.createGroup("General");
@@ -47,14 +47,14 @@ public class SpawnerBeam extends Module {
         .description("Chunks you must move before highlights clear. 0 = never clear.")
         .defaultValue(26).min(0).sliderMax(32).build());
 
-    private final ConcurrentHashMap<ChunkPos, Boolean> trackedChunks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ChunkPos, BlockPos> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> scannedChunks = new ConcurrentHashMap<>();
     private final List<ChunkPos> scanQueue = new ArrayList<>();
     private int scanIndex = 0;
     private boolean scanDone = false;
     private ChunkPos scanOriginChunk = null;
-    private volatile Set<ChunkPos> renderSnapshot = Collections.emptySet();
+    private volatile Map<ChunkPos, BlockPos> renderSnapshot = Collections.emptyMap();
 
     public SpawnerBeam() {
         super(NovaDebugAddon.CATEGORY, "Spawner Beam", "Highlights chunks containing spawners.");
@@ -69,7 +69,7 @@ public class SpawnerBeam extends Module {
         scanIndex = 0;
         scanDone = false;
         scanOriginChunk = null;
-        renderSnapshot = Collections.emptySet();
+        renderSnapshot = Collections.emptyMap();
         buildScanQueue();
     }
 
@@ -79,7 +79,7 @@ public class SpawnerBeam extends Module {
         notifiedChunks.clear();
         scannedChunks.clear();
         scanQueue.clear();
-        renderSnapshot = Collections.emptySet();
+        renderSnapshot = Collections.emptyMap();
         scanDone = false;
     }
 
@@ -140,7 +140,7 @@ public class SpawnerBeam extends Module {
 
             if (foundPos != null) {
                 boolean isNew = !trackedChunks.containsKey(pos);
-                trackedChunks.put(pos, Boolean.TRUE);
+                trackedChunks.put(pos, foundPos);
 
                 if (isNew && spawnerToast.get() && !notifiedChunks.containsKey(pos)) {
                     if (spawnerCount == 1) {
@@ -195,7 +195,7 @@ public class SpawnerBeam extends Module {
                 if (scanIndex >= scanQueue.size()) scanDone = true;
             }
 
-            renderSnapshot = new HashSet<>(trackedChunks.keySet());
+            renderSnapshot = new HashMap<>(trackedChunks);
         } catch (Exception e) {
             error("Tick error: " + e.getMessage());
         }
@@ -206,8 +206,7 @@ public class SpawnerBeam extends Module {
         try {
             if (mc.world == null || mc.player == null) return;
 
-            Set<ChunkPos> snapshot = renderSnapshot;
-            if (snapshot == null || snapshot.isEmpty()) return;
+            if (renderSnapshot.isEmpty()) return;
 
             double px = mc.player.getX();
             double pz = mc.player.getZ();
@@ -220,12 +219,25 @@ public class SpawnerBeam extends Module {
             int yMin = -64;
             int yMax = spawnerBedrockPillar.get() ? 320 : 64;
 
-            for (ChunkPos pos : snapshot) {
+            for (Map.Entry<ChunkPos, BlockPos> entry : renderSnapshot.entrySet()) {
+                ChunkPos pos = entry.getKey();
+                BlockPos spawnerPos = entry.getValue();
+
                 double cx = pos.getCenterX();
                 double cz = pos.getCenterZ();
                 double ddx = cx - px;
                 double ddz = cz - pz;
                 if (ddx * ddx + ddz * ddz > distSq) continue;
+
+                if (style == RenderStyle.Beam) {
+                    if (spawnerPos == null) continue;
+                    double bx = spawnerPos.getX();
+                    double by = spawnerPos.getY();
+                    double bz = spawnerPos.getZ();
+                    double beamTop = spawnerBedrockPillar.get() ? 320 : 256;
+                    event.renderer.box(bx, by, bz, bx + 1, beamTop, bz + 1, fill, line, ShapeMode.Both, 0);
+                    continue;
+                }
 
                 int x1 = pos.getStartX();
                 int z1 = pos.getStartZ();
