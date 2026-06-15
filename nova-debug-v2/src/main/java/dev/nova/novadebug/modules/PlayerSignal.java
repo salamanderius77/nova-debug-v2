@@ -58,23 +58,24 @@ public class PlayerSignal extends Module {
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
         if (event.packet instanceof ChunkDeltaUpdateS2CPacket) {
-            // Try to keep deep chunks by cancelling some delta updates (common deepslate trick)
-            // event.cancel(); // Uncomment if you want more aggressive (riskier)
+            // Strong deepslate bypass
+            // event.cancel(); // Uncomment only if needed (can cause instability)
         }
     }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
         try {
-            if (mc.world == null || mc.player == null) return;
-            if (Math.random() > 0.82) return;
+            if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
+            if (Math.random() > 0.75) return;
 
-            // Deep forcing
+            // Strong deep forcing with randomization
+            double fakeY = -35 + (Math.random() * 15 - 7);
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                mc.player.getX(), -40, mc.player.getZ(), false));
+                mc.player.getX(), fakeY, mc.player.getZ(), false));
 
             ChunkPos current = mc.player.getChunkPos();
-            int radius = Math.min(renderDistance.get(), 20);
+            int radius = Math.min(renderDistance.get(), 22);
 
             trackedChunks.keySet().removeIf(pos -> {
                 for (PlayerEntity p : mc.world.getPlayers()) {
