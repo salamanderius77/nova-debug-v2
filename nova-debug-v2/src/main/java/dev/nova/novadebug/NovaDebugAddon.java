@@ -1,7 +1,7 @@
 package dev.nova.novadebug;
 
-import dev.nova.novadebug.modules.GoofyDebug;
-import dev.nova.novadebug.modules.ActivityBypass;
+import dev.nova.novadebug.modules.SpawnerBeam;
+import dev.nova.novadebug.modules.PlayerSignal;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -13,8 +13,8 @@ public class NovaDebugAddon extends MeteorAddon {
 
     @Override
     public void onInitialize() {
-        Modules.get().add(new GoofyDebug());
-        Modules.get().add(new ActivityBypass());
+        Modules.get().add(new SpawnerBeam());
+        Modules.get().add(new PlayerSignal());
     }
 
     @Override
