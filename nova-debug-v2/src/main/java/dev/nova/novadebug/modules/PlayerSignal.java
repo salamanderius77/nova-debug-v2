@@ -27,13 +27,10 @@ public class PlayerSignal extends Module {
     private final Setting<RenderStyle> playerStyle = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
     private final Setting<Boolean> playerToast = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
     private final Setting<Boolean> playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder()
-        .name("bedrock-pillar")
-        .description("Extend player pillar from bedrock (-64) to sky (320).")
-        .defaultValue(true).build());
+        .name("bedrock-pillar").defaultValue(true).build());
 
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
-        .name("render-distance")
-        .defaultValue(26).min(1).sliderMax(32).build());
+        .name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, Boolean> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
@@ -62,51 +59,35 @@ public class PlayerSignal extends Module {
         try {
             if (mc.world == null || mc.player == null) return;
 
-            ChunkPos currentChunk = mc.player.getChunkPos();
-            int radius = Math.min(renderDistance.get(), 32);
+            // Throttle for less detection
+            if (Math.random() > 0.92) return;
 
-            List<ChunkPos> toRemove = new ArrayList<>();
-            for (ChunkPos pos : trackedChunks.keySet()) {
-                boolean found = false;
-                List<? extends PlayerEntity> players = mc.world.getPlayers();
-                if (players != null) {
-                    for (PlayerEntity p : players) {
-                        if (p == null || p == mc.player) continue;
-                        if (p.getY() > -1) continue;
-                        ChunkPos pc = p.getChunkPos();
-                        if (pc.x == pos.x && pc.z == pos.z) { found = true; break; }
-                    }
+            ChunkPos current = mc.player.getChunkPos();
+            int radius = Math.min(renderDistance.get(), 24);
+
+            trackedChunks.keySet().removeIf(pos -> {
+                for (PlayerEntity p : mc.world.getPlayers()) {
+                    if (p != mc.player && p.getY() <= -1 && p.getChunkPos().equals(pos)) return false;
                 }
-                if (!found) toRemove.add(pos);
-            }
-            for (ChunkPos pos : toRemove) {
-                trackedChunks.remove(pos);
-                notifiedChunks.remove(pos);
-            }
+                return true;
+            });
 
-            List<? extends PlayerEntity> players = mc.world.getPlayers();
-            if (players != null) {
-                for (PlayerEntity p : players) {
-                    if (p == null || p == mc.player) continue;
-                    if (p.getY() > -1) continue;
-                    ChunkPos pos = p.getChunkPos();
-                    if (Math.abs(pos.x - currentChunk.x) > radius) continue;
-                    if (Math.abs(pos.z - currentChunk.z) > radius) continue;
+            for (PlayerEntity p : mc.world.getPlayers()) {
+                if (p == mc.player || p.getY() > -1) continue;
+                ChunkPos pos = p.getChunkPos();
+                if (Math.abs(pos.x - current.x) > radius || Math.abs(pos.z - current.z) > radius) continue;
 
-                    boolean isNew = !trackedChunks.containsKey(pos);
-                    trackedChunks.put(pos, Boolean.TRUE);
+                boolean isNew = !trackedChunks.containsKey(pos);
+                trackedChunks.put(pos, true);
 
-                    if (isNew && playerToast.get() && !notifiedChunks.containsKey(pos)) {
-                        info("§d[Player Signal] Player §f" + p.getName().getString() + " §dfound!");
-                        notifiedChunks.put(pos, Boolean.TRUE);
-                    }
+                if (isNew && playerToast.get() && !notifiedChunks.containsKey(pos)) {
+                    info("§d[Player Signal] Player found");  // muted
+                    notifiedChunks.put(pos, true);
                 }
             }
 
             renderSnapshot = new HashSet<>(trackedChunks.keySet());
-        } catch (Exception e) {
-            error("Tick error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     @EventHandler
@@ -146,9 +127,7 @@ public class PlayerSignal extends Module {
                     event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
                 }
             }
-        } catch (Exception e) {
-            error("Render error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     private Color c(SettingColor sc) { return new Color(sc.r, sc.g, sc.b, sc.a); }
