@@ -8,9 +8,10 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import meteordevelopment.meteorclient.utils.render.RenderUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.toast.SystemToast;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.ChunkPos;
 
 import java.util.*;
@@ -79,7 +80,9 @@ public class PlayerSignal extends Module {
                         int bx = (int) Math.floor(p.getX());
                         int by = (int) Math.floor(p.getY());
                         int bz = (int) Math.floor(p.getZ());
-                        RenderUtils.addToast(p.getName().getString(), "X: " + bx + " Y: " + by + " Z: " + bz);
+                        SystemToast.add(mc.getToastManager(), SystemToast.Type.PERIODIC_NOTIFICATION,
+                            Text.literal(p.getName().getString()),
+                            Text.literal("X: " + bx + " Y: " + by + " Z: " + bz));
                         notifiedChunks.put(pos, true);
                     }
                 }
