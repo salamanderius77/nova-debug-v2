@@ -10,7 +10,6 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.math.ChunkPos;
 
 import java.util.*;
@@ -56,20 +55,8 @@ public class PlayerSignal extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         try {
-            if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
-            if (Math.random() > 0.68) return;
+            if (mc.world == null || mc.player == null) return;
 
-            //             // ✅ 1.21.11 - 5 parameters
-            double fakeY = -30 - (Math.random() * 25);
-            mc.player.networkHandler.sendPacket(
-                new PlayerMoveC2SPacket.PositionAndOnGround(
-                    mc.player.getX(), 
-                    fakeY, 
-                    mc.player.getZ(), 
-                    false, 
-                    mc.player.horizontalCollision
-                )
-            );
             ChunkPos current = mc.player.getChunkPos();
             int radius = Math.min(renderDistance.get(), 20);
 
