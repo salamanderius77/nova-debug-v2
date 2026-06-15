@@ -32,6 +32,10 @@ public class SpawnerBeam extends Module {
         .name("bedrock-pillar")
         .description("Extend spawner pillar from bedrock (-64) to sky (320).")
         .defaultValue(true).build());
+    private final Setting<Integer> alpha = sgSpawner.add(new IntSetting.Builder()
+        .name("alpha")
+        .description("Opacity of the highlight fill. 1 = almost invisible, 255 = fully opaque.")
+        .defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
 
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
         .name("render-distance")
@@ -122,7 +126,7 @@ public class SpawnerBeam extends Module {
             BlockPos foundPos = null;
             int spawnerCount = 0;
             int bottomY = mc.world.getBottomY();
-            int topY = mc.world.getTopY();
+            int topY = Math.min(mc.world.getTopY(), 0); // only detect spawners at y = -1 and below
 
             for (int lx = 0; lx < 16; lx++) {
                 for (int lz = 0; lz < 16; lz++) {
@@ -213,7 +217,7 @@ public class SpawnerBeam extends Module {
             int distBlocks = renderDistance.get() * 16;
             double distSq = (double) distBlocks * distBlocks;
 
-            Color fill = c(spawnerFill.get());
+            Color fill = cWithAlpha(spawnerFill.get(), alpha.get());
             Color line = c(spawnerLine.get());
             RenderStyle style = spawnerStyle.get();
             int yMin = -64;
@@ -256,4 +260,5 @@ public class SpawnerBeam extends Module {
     }
 
     private Color c(SettingColor sc) { return new Color(sc.r, sc.g, sc.b, sc.a); }
+    private Color cWithAlpha(SettingColor sc, int a) { return new Color(sc.r, sc.g, sc.b, a); }
 }
