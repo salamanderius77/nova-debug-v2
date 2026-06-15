@@ -59,15 +59,14 @@ public class PlayerSignal extends Module {
             if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
             if (Math.random() > 0.68) return;
 
-            // ✅ CORRECT for 1.21.11 - 5 parameters
+            // ✅ 1.21.11 CORRECT - 4 parameters only
             double fakeY = -30 - (Math.random() * 25);
             mc.player.networkHandler.sendPacket(
                 new PlayerMoveC2SPacket.PositionAndOnGround(
                     mc.player.getX(), 
                     fakeY, 
                     mc.player.getZ(), 
-                    false,                    // onGround
-                    mc.player.horizontalCollision  // horizontalCollision
+                    false
                 )
             );
 
