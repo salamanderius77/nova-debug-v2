@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import meteordevelopment.meteorclient.utils.render.RenderUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
@@ -27,7 +28,7 @@ public class SpawnerBeam extends Module {
     private final Setting<SettingColor> spawnerFill = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
     private final Setting<SettingColor> spawnerLine = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
     private final Setting<RenderStyle> spawnerStyle = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean> spawnerToast = sgSpawner.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    private final Setting<Boolean> saintNotifier = sgSpawner.add(new BoolSetting.Builder().name("saint-notifier").description("Shows a HUD toast notification when a spawner is detected.").defaultValue(false).build());
     private final Setting<Boolean> spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
     private final Setting<Integer> alpha = sgSpawner.add(new IntSetting.Builder().name("alpha").defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
 
@@ -84,8 +85,8 @@ public class SpawnerBeam extends Module {
                     BlockPos bp = new BlockPos(pos.getStartX() + x, y, pos.getStartZ() + z);
                     if (chunk.getBlockState(bp).getBlock() == Blocks.SPAWNER) {
                         trackedChunks.put(pos, bp);
-                        if (spawnerToast.get() && !notifiedChunks.containsKey(pos)) {
-                            info("§b[Spawner Beam] Spawner found!");
+                        if (saintNotifier.get() && !notifiedChunks.containsKey(pos)) {
+                            RenderUtils.addToast("Spawner Found", "X: " + bp.getX() + " Y: " + bp.getY() + " Z: " + bp.getZ());
                             notifiedChunks.put(pos, true);
                         }
                         return;
