@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "nova-debug",
+  "id": "saint-addon",
   "version": "${version}",
   "name": "Saint's Addon",
-  "description": "Chunk-based underground activity analysis addon for Meteor Client.",
+  "description": "Custom Addon Made By Saint.",
   "authors": [
     "Saint"
   ],
@@ -18,9 +18,9 @@
   },
   "mixins": [],
   "depends": {
-    "fabricloader": ">=0.15.0",
+    "fabricloader": ">=0.18.4",
     "fabric": "*",
-    "minecraft": "~1.21.1",
+    "minecraft": "~1.21.11",
     "meteor-client": "*"
   }
 }
