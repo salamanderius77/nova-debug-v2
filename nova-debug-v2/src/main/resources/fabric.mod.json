@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "nova-debug",
   "version": "${version}",
-  "name": "Nova Debug v2",
+  "name": "Saint's Addon",
   "description": "Chunk-based underground activity analysis addon for Meteor Client.",
   "authors": [
-    "Nova"
+    "Saint"
   ],
   "contact": {},
   "license": "MIT",
