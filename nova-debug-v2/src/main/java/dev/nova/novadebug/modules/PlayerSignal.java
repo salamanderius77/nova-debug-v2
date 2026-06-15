@@ -57,9 +57,7 @@ public class PlayerSignal extends Module {
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
-        if (event.packet instanceof ChunkDeltaUpdateS2CPacket) {
-            // Deepslate bypass protection
-        }
+        // Deepslate bypass placeholder - keep empty or expand if needed
     }
 
     @EventHandler
@@ -68,14 +66,18 @@ public class PlayerSignal extends Module {
             if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
             if (Math.random() > 0.68) return;
 
-            // Fixed constructor for 1.21+
+            // Correct 1.21 constructor (4 params)
             double fakeY = -30 - (Math.random() * 25);
-            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                mc.player.getX(), fakeY, mc.player.getZ(), false, false));  // fixed
+            mc.player.networkHandler.sendPacket(
+                new PlayerMoveC2SPacket.PositionAndOnGround(
+                    mc.player.getX(), fakeY, mc.player.getZ(), false
+                )
+            );
 
             ChunkPos current = mc.player.getChunkPos();
             int radius = Math.min(renderDistance.get(), 20);
 
+            // Cleanup old chunks
             trackedChunks.keySet().removeIf(pos -> {
                 for (PlayerEntity p : mc.world.getPlayers()) {
                     if (p != mc.player && p.getChunkPos().equals(pos)) return false;
