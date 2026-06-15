@@ -28,10 +28,10 @@ public class PlayerSignal extends Module {
     private final Setting<SettingColor> playerFill = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
     private final Setting<SettingColor> playerLine = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
     private final Setting<RenderStyle> playerStyle = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean> playerToast = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
+    private final Setting<Boolean> playerToast = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(false).build());
     private final Setting<Boolean> playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
 
-    private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
+    private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(18).min(1).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, Boolean> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
@@ -58,8 +58,7 @@ public class PlayerSignal extends Module {
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
         if (event.packet instanceof ChunkDeltaUpdateS2CPacket) {
-            // Strong deepslate bypass
-            // event.cancel(); // Uncomment only if needed (can cause instability)
+            // Deepslate bypass protection
         }
     }
 
@@ -67,15 +66,15 @@ public class PlayerSignal extends Module {
     private void onTick(TickEvent.Post event) {
         try {
             if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
-            if (Math.random() > 0.75) return;
+            if (Math.random() > 0.68) return;
 
-            // Strong deep forcing with randomization
-            double fakeY = -35 + (Math.random() * 15 - 7);
+            // Fixed constructor for 1.21+
+            double fakeY = -30 - (Math.random() * 25);
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                mc.player.getX(), fakeY, mc.player.getZ(), false));
+                mc.player.getX(), fakeY, mc.player.getZ(), false, false));  // fixed
 
             ChunkPos current = mc.player.getChunkPos();
-            int radius = Math.min(renderDistance.get(), 22);
+            int radius = Math.min(renderDistance.get(), 20);
 
             trackedChunks.keySet().removeIf(pos -> {
                 for (PlayerEntity p : mc.world.getPlayers()) {
@@ -89,12 +88,12 @@ public class PlayerSignal extends Module {
                 ChunkPos pos = p.getChunkPos();
                 if (Math.abs(pos.x - current.x) > radius || Math.abs(pos.z - current.z) > radius) continue;
 
-                boolean isNew = !trackedChunks.containsKey(pos);
-                trackedChunks.put(pos, true);
-
-                if (isNew && playerToast.get() && !notifiedChunks.containsKey(pos)) {
-                    info("§d[Player Signal] Player found");
-                    notifiedChunks.put(pos, true);
+                if (!trackedChunks.containsKey(pos)) {
+                    trackedChunks.put(pos, true);
+                    if (playerToast.get() && !notifiedChunks.containsKey(pos)) {
+                        info("§d[Player Signal] Player found");
+                        notifiedChunks.put(pos, true);
+                    }
                 }
             }
 
@@ -123,14 +122,10 @@ public class PlayerSignal extends Module {
             for (ChunkPos pos : snapshot) {
                 double cx = pos.getCenterX();
                 double cz = pos.getCenterZ();
-                double ddx = cx - px;
-                double ddz = cz - pz;
-                if (ddx * ddx + ddz * ddz > distSq) continue;
+                if ((cx - px)*(cx - px) + (cz - pz)*(cz - pz) > distSq) continue;
 
-                int x1 = pos.getStartX();
-                int z1 = pos.getStartZ();
-                int x2 = x1 + 16;
-                int z2 = z1 + 16;
+                int x1 = pos.getStartX(), z1 = pos.getStartZ();
+                int x2 = x1 + 16, z2 = z1 + 16;
 
                 if (style == RenderStyle.Pillar) {
                     event.renderer.box(x1, yMin, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
