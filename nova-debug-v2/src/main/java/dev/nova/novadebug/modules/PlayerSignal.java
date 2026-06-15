@@ -1,6 +1,7 @@
 package dev.nova.novadebug.modules;
 
 import dev.nova.novadebug.NovaDebugAddon;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -10,6 +11,8 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
 import net.minecraft.util.math.ChunkPos;
 
 import java.util.*;
@@ -26,11 +29,9 @@ public class PlayerSignal extends Module {
     private final Setting<SettingColor> playerLine = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
     private final Setting<RenderStyle> playerStyle = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
     private final Setting<Boolean> playerToast = sgPlayers.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
-    private final Setting<Boolean> playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder()
-        .name("bedrock-pillar").defaultValue(true).build());
+    private final Setting<Boolean> playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
 
-    private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
-        .name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
+    private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, Boolean> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
@@ -55,25 +56,35 @@ public class PlayerSignal extends Module {
     }
 
     @EventHandler
+    private void onPacketReceive(PacketEvent.Receive event) {
+        if (event.packet instanceof ChunkDeltaUpdateS2CPacket) {
+            // Try to keep deep chunks by cancelling some delta updates (common deepslate trick)
+            // event.cancel(); // Uncomment if you want more aggressive (riskier)
+        }
+    }
+
+    @EventHandler
     private void onTick(TickEvent.Post event) {
         try {
             if (mc.world == null || mc.player == null) return;
+            if (Math.random() > 0.82) return;
 
-            // Throttle for less detection
-            if (Math.random() > 0.92) return;
+            // Deep forcing
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                mc.player.getX(), -40, mc.player.getZ(), false));
 
             ChunkPos current = mc.player.getChunkPos();
-            int radius = Math.min(renderDistance.get(), 24);
+            int radius = Math.min(renderDistance.get(), 20);
 
             trackedChunks.keySet().removeIf(pos -> {
                 for (PlayerEntity p : mc.world.getPlayers()) {
-                    if (p != mc.player && p.getY() <= -1 && p.getChunkPos().equals(pos)) return false;
+                    if (p != mc.player && p.getChunkPos().equals(pos)) return false;
                 }
                 return true;
             });
 
             for (PlayerEntity p : mc.world.getPlayers()) {
-                if (p == mc.player || p.getY() > -1) continue;
+                if (p == mc.player) continue;
                 ChunkPos pos = p.getChunkPos();
                 if (Math.abs(pos.x - current.x) > radius || Math.abs(pos.z - current.z) > radius) continue;
 
@@ -81,7 +92,7 @@ public class PlayerSignal extends Module {
                 trackedChunks.put(pos, true);
 
                 if (isNew && playerToast.get() && !notifiedChunks.containsKey(pos)) {
-                    info("§d[Player Signal] Player found");  // muted
+                    info("§d[Player Signal] Player found");
                     notifiedChunks.put(pos, true);
                 }
             }
@@ -94,7 +105,6 @@ public class PlayerSignal extends Module {
     private void onRender3D(Render3DEvent event) {
         try {
             if (mc.world == null || mc.player == null) return;
-
             Set<ChunkPos> snapshot = renderSnapshot;
             if (snapshot == null || snapshot.isEmpty()) return;
 
