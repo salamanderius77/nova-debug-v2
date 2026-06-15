@@ -1,6 +1,7 @@
 package dev.nova.novadebug.modules;
 
 import dev.nova.novadebug.NovaDebugAddon;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -10,6 +11,8 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
@@ -29,27 +32,18 @@ public class SpawnerBeam extends Module {
     private final Setting<RenderStyle> spawnerStyle = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
     private final Setting<Boolean> spawnerToast = sgSpawner.add(new BoolSetting.Builder().name("toast-notify").defaultValue(true).build());
     private final Setting<Boolean> spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder()
-        .name("bedrock-pillar")
-        .description("Extend spawner pillar from bedrock (-64) to sky (320).")
-        .defaultValue(true).build());
+        .name("bedrock-pillar").defaultValue(true).build());
     private final Setting<Integer> alpha = sgSpawner.add(new IntSetting.Builder()
-        .name("alpha")
-        .description("Opacity of the highlight fill. 1 = almost invisible, 255 = fully opaque.")
-        .defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
+        .name("alpha").defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
 
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
-        .name("render-distance")
-        .defaultValue(20).min(1).sliderMax(32).build());
+        .name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
 
     private final Setting<Integer> chunksPerTick = sgGeneral.add(new IntSetting.Builder()
-        .name("chunks-per-tick")
-        .description("How many chunks to scan per tick. Higher = faster scan but more lag.")
-        .defaultValue(1).min(1).sliderMax(5).build());
+        .name("chunks-per-tick").defaultValue(1).min(1).sliderMax(5).build());
 
     private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder()
-        .name("clear-distance")
-        .description("Chunks you must move before highlights clear. 0 = never clear.")
-        .defaultValue(20).min(0).sliderMax(32).build());
+        .name("clear-distance").defaultValue(20).min(0).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, BlockPos> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
@@ -87,13 +81,19 @@ public class SpawnerBeam extends Module {
         scanDone = false;
     }
 
+    @EventHandler
+    private void onPacketReceive(PacketEvent.Receive event) {
+        if (event.packet instanceof ChunkDeltaUpdateS2CPacket) {
+            // Deepslate bypass - prevent server from hiding deep blocks
+            // event.cancel();   // Uncomment this line for more aggressive bypass (higher ban risk)
+        }
+    }
+
     private void buildScanQueue() {
         if (mc.world == null || mc.player == null) return;
-
         scanQueue.clear();
         scanIndex = 0;
         scanDone = false;
-
         ChunkPos playerChunk = mc.player.getChunkPos();
         scanOriginChunk = playerChunk;
 
@@ -107,16 +107,20 @@ public class SpawnerBeam extends Module {
             }
         }
 
-        all.sort(Comparator.comparingInt(p ->
-            Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
-
+        all.sort(Comparator.comparingInt(p -> Math.abs(p.x - playerChunk.x) + Math.abs(p.z - playerChunk.z)));
         scanQueue.addAll(all);
     }
 
     private void scanChunk(ChunkPos pos) {
         try {
             if (mc.world == null || mc.player == null) return;
-            if (!mc.world.isChunkLoaded(pos.x, pos.z)) return;
+
+            // Aggressive deep chunk forcing
+            if (!mc.world.isChunkLoaded(pos.x, pos.z)) {
+                mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                    mc.player.getX(), -45, mc.player.getZ(), false));
+                return;
+            }
 
             WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
             if (chunk == null || chunk.isEmpty()) return;
@@ -126,11 +130,11 @@ public class SpawnerBeam extends Module {
             BlockPos foundPos = null;
             int spawnerCount = 0;
             int bottomY = mc.world.getBottomY();
-            int topY = -20; // optimized for spawners
+            int topY = 0;
 
             for (int lx = 0; lx < 16; lx++) {
                 for (int lz = 0; lz < 16; lz++) {
-                    for (int y = bottomY; y < topY; y += 2) {  // step 2 = less lag
+                    for (int y = bottomY; y < topY; y += 2) {
                         try {
                             BlockPos bp = new BlockPos(pos.getStartX() + lx, y, pos.getStartZ() + lz);
                             if (chunk.getBlockState(bp).isOf(Blocks.SPAWNER)) {
@@ -147,7 +151,7 @@ public class SpawnerBeam extends Module {
                 trackedChunks.put(pos, foundPos);
 
                 if (isNew && spawnerToast.get() && !notifiedChunks.containsKey(pos)) {
-                    info("§9[Spawner] Found");  // muted
+                    info("§9[Spawner] Found");
                     notifiedChunks.put(pos, Boolean.TRUE);
                 }
             }
@@ -158,9 +162,7 @@ public class SpawnerBeam extends Module {
     private void onTick(TickEvent.Post event) {
         try {
             if (mc.world == null || mc.player == null) return;
-
-            // Throttle to avoid detection
-            if (Math.random() > 0.9) return;
+            if (Math.random() > 0.88) return;
 
             ChunkPos currentChunk = mc.player.getChunkPos();
             int radius = Math.min(renderDistance.get(), 24);
@@ -203,8 +205,7 @@ public class SpawnerBeam extends Module {
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         try {
-            if (mc.world == null || mc.player == null) return;
-            if (renderSnapshot.isEmpty()) return;
+            if (mc.world == null || mc.player == null || renderSnapshot.isEmpty()) return;
 
             double px = mc.player.getX();
             double pz = mc.player.getZ();
