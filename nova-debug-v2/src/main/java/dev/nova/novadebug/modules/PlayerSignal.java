@@ -59,17 +59,17 @@ public class PlayerSignal extends Module {
             if (mc.world == null || mc.player == null || mc.player.networkHandler == null) return;
             if (Math.random() > 0.68) return;
 
-            // ✅ 1.21.11 CORRECT - 4 parameters only
+            //             // ✅ 1.21.11 - 5 parameters
             double fakeY = -30 - (Math.random() * 25);
             mc.player.networkHandler.sendPacket(
                 new PlayerMoveC2SPacket.PositionAndOnGround(
                     mc.player.getX(), 
                     fakeY, 
                     mc.player.getZ(), 
-                    false
+                    false, 
+                    mc.player.horizontalCollision
                 )
             );
-
             ChunkPos current = mc.player.getChunkPos();
             int radius = Math.min(renderDistance.get(), 20);
 
