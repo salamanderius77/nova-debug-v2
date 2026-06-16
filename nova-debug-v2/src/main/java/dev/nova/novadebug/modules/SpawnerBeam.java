@@ -45,15 +45,16 @@ public class SpawnerBeam extends Module {
         .description("Chunks scanned per tick. Higher = faster but more CPU.")
         .defaultValue(4).min(1).sliderMax(16).build());
 
-    // Single lock covering scanQueue + queued so no race between buildScanQueue() and onTick().
     private final Object queueLock = new Object();
 
-    private final ConcurrentHashMap<ChunkPos, BlockPos> trackedChunks  = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<ChunkPos, Boolean>  scannedChunks  = new ConcurrentHashMap<>();
-    private PriorityQueue<ChunkPos> scanQueue  = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
-    private final Set<ChunkPos>     queued     = ConcurrentHashMap.newKeySet();
-    private volatile ChunkPos       scanOriginChunk = null;
-    private volatile Map<ChunkPos, BlockPos> renderSnapshot = Collections.emptyMap();
+    // KEY CHANGE: List<BlockPos> instead of BlockPos so a chunk with 4 spawners
+    // stores all 4 positions, not just the first one found.
+    private final ConcurrentHashMap<ChunkPos, List<BlockPos>> trackedChunks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ChunkPos, Boolean> scannedChunks = new ConcurrentHashMap<>();
+    private PriorityQueue<ChunkPos> scanQueue = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
+    private final Set<ChunkPos> queued = ConcurrentHashMap.newKeySet();
+    private volatile ChunkPos scanOriginChunk = null;
+    private volatile Map<ChunkPos, List<BlockPos>> renderSnapshot = Collections.emptyMap();
 
     public SpawnerBeam() {
         super(NovaDebugAddon.CATEGORY, "Spawner Beam", "Highlights chunks containing spawners.");
@@ -67,9 +68,9 @@ public class SpawnerBeam extends Module {
             trackedChunks.clear();
             scannedChunks.clear();
             queued.clear();
-            scanQueue        = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
-            scanOriginChunk  = null;
-            renderSnapshot   = Collections.emptyMap();
+            scanQueue       = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
+            scanOriginChunk = null;
+            renderSnapshot  = Collections.emptyMap();
         }
         buildScanQueue();
     }
@@ -91,7 +92,6 @@ public class SpawnerBeam extends Module {
         ChunkPos origin = mc.player.getChunkPos();
         synchronized (queueLock) {
             scanOriginChunk = origin;
-            // Nearest chunks first so nearby spawners appear fastest.
             scanQueue = new PriorityQueue<>(Comparator.comparingLong(this::distSqToOrigin));
             queued.clear();
             int r = renderDistance.get();
@@ -108,7 +108,6 @@ public class SpawnerBeam extends Module {
         return dx * dx + dz * dz;
     }
 
-    /** Must be called while holding queueLock. */
     private void enqueueUnsafe(ChunkPos p) {
         if (scannedChunks.containsKey(p)) return;
         if (!queued.add(p)) return;
@@ -125,13 +124,15 @@ public class SpawnerBeam extends Module {
         WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
         if (chunk == null) return;
 
-        BlockPos found = findSpawnerInChunk(chunk, pos);
-        if (found != null) trackedChunks.put(pos, found);
+        // KEY CHANGE: collect ALL spawners in the chunk, not just the first one.
+        List<BlockPos> found = findAllSpawnersInChunk(chunk, pos);
+        if (!found.isEmpty()) trackedChunks.put(pos, found);
         scannedChunks.put(pos, true);
     }
 
-    private BlockPos findSpawnerInChunk(WorldChunk chunk, ChunkPos pos) {
-        if (mc.world == null) return null;
+    private List<BlockPos> findAllSpawnersInChunk(WorldChunk chunk, ChunkPos pos) {
+        List<BlockPos> result = new ArrayList<>();
+        if (mc.world == null) return result;
         int minY = mc.world.getBottomY();
         int maxY = mc.world.getTopY();
         for (int sY = minY; sY < maxY; sY += 16) {
@@ -141,10 +142,11 @@ public class SpawnerBeam extends Module {
                 for (int z = 0; z < 16; z++)
                     for (int y = sY; y < yEnd; y++) {
                         BlockPos bp = new BlockPos(pos.getStartX() + x, y, pos.getStartZ() + z);
-                        if (chunk.getBlockState(bp).getBlock() == Blocks.SPAWNER) return bp;
+                        if (chunk.getBlockState(bp).getBlock() == Blocks.SPAWNER)
+                            result.add(bp); // add every spawner, keep going
                     }
         }
-        return null;
+        return result;
     }
 
     private boolean isSectionEmpty(WorldChunk chunk, int sY) {
@@ -158,9 +160,6 @@ public class SpawnerBeam extends Module {
     private void onTick(TickEvent.Post event) {
         if (mc.world == null || mc.player == null) return;
 
-        // Re-enqueue chunks that have newly loaded since the last scan pass.
-        // Done every tick instead of via ChunkDataEvent (which may not exist in
-        // all Meteor builds) — cheap because enqueueUnsafe skips already-scanned chunks.
         ChunkPos origin = scanOriginChunk;
         if (origin != null) {
             int r = renderDistance.get();
@@ -190,42 +189,49 @@ public class SpawnerBeam extends Module {
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         if (mc.world == null || mc.player == null) return;
-        Map<ChunkPos, BlockPos> snapshot = renderSnapshot;
+        Map<ChunkPos, List<BlockPos>> snapshot = renderSnapshot;
         if (snapshot.isEmpty()) return;
 
         Color fill  = cWithAlpha(spawnerFill.get(), alpha.get());
         Color line  = c(spawnerLine.get());
         RenderStyle style = spawnerStyle.get();
 
-        for (Map.Entry<ChunkPos, BlockPos> entry : snapshot.entrySet()) {
-            ChunkPos pos        = entry.getKey();
-            BlockPos spawnerPos = entry.getValue();
-
-            int x1 = pos.getStartX(), z1 = pos.getStartZ();
-            int x2 = x1 + 16,        z2 = z1 + 16;
+        for (Map.Entry<ChunkPos, List<BlockPos>> entry : snapshot.entrySet()) {
+            ChunkPos pos          = entry.getKey();
+            List<BlockPos> spawners = entry.getValue();
+            if (spawners == null || spawners.isEmpty()) continue;
 
             if (style == RenderStyle.Pillar) {
+                // One pillar covering the whole chunk regardless of spawner count.
+                int x1 = pos.getStartX(), z1 = pos.getStartZ();
+                int x2 = x1 + 16,        z2 = z1 + 16;
                 int yMax = spawnerBedrockPillar.get() ? 320 : 64;
                 event.renderer.box(x1, -64, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
 
             } else if (style == RenderStyle.Flat) {
+                // One flat slice covering the whole chunk.
+                int x1 = pos.getStartX(), z1 = pos.getStartZ();
+                int x2 = x1 + 16,        z2 = z1 + 16;
                 event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
 
             } else { // Beam
-                if (spawnerPos == null) continue;
-                double hw  = beamWidth.get() / 2.0;
-                double cx  = spawnerPos.getX() + 0.5;
-                double cz  = spawnerPos.getZ() + 0.5;
+                // KEY CHANGE: one individual beam per spawner block.
+                // 4 spawners in one chunk = 4 separate beams.
+                double hw = beamWidth.get() / 2.0;
                 int beamTop = spawnerBedrockPillar.get() ? 320 : 128;
-                event.renderer.box(
-                    cx - hw, spawnerPos.getY(), cz - hw,
-                    cx + hw, beamTop,           cz + hw,
-                    fill, line, ShapeMode.Both, 0
-                );
+                for (BlockPos spawnerPos : spawners) {
+                    double cx = spawnerPos.getX() + 0.5;
+                    double cz = spawnerPos.getZ() + 0.5;
+                    event.renderer.box(
+                        cx - hw, spawnerPos.getY(), cz - hw,
+                        cx + hw, beamTop,           cz + hw,
+                        fill, line, ShapeMode.Both, 0
+                    );
+                }
             }
         }
     }
 
-    private Color c(SettingColor sc)              { return new Color(sc.r, sc.g, sc.b, sc.a); }
+    private Color c(SettingColor sc)                 { return new Color(sc.r, sc.g, sc.b, sc.a); }
     private Color cWithAlpha(SettingColor sc, int a) { return new Color(sc.r, sc.g, sc.b, a); }
 }
