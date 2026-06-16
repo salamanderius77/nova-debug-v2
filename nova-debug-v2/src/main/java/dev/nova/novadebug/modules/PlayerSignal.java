@@ -11,7 +11,6 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.ChunkPos;
-import dev.nova.novadebug.SaintToast;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,13 +25,11 @@ public class PlayerSignal extends Module {
     private final Setting<SettingColor> playerFill = sgPlayers.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(180, 0, 255, 40)).build());
     private final Setting<SettingColor> playerLine = sgPlayers.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(180, 0, 255, 200)).build());
     private final Setting<RenderStyle> playerStyle = sgPlayers.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean> saintNotifier = sgPlayers.add(new BoolSetting.Builder().name("saint-notifier").description("Shows a HUD toast notification when a player is detected.").defaultValue(false).build());
     private final Setting<Boolean> playerBedrockPillar = sgPlayers.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
 
     private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(18).min(1).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, Boolean> trackedChunks = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
     private volatile Set<ChunkPos> renderSnapshot = Collections.emptySet();
 
     public PlayerSignal() {
@@ -42,14 +39,12 @@ public class PlayerSignal extends Module {
     @Override
     public void onActivate() {
         trackedChunks.clear();
-        notifiedChunks.clear();
         renderSnapshot = Collections.emptySet();
     }
 
     @Override
     public void onDeactivate() {
         trackedChunks.clear();
-        notifiedChunks.clear();
         renderSnapshot = Collections.emptySet();
     }
 
@@ -75,10 +70,6 @@ public class PlayerSignal extends Module {
 
                 if (!trackedChunks.containsKey(pos)) {
                     trackedChunks.put(pos, true);
-                    if (saintNotifier.get() && !notifiedChunks.containsKey(pos)) {
-                        SaintToast.get().show("Player Found!", p.getName().getString());
-                        notifiedChunks.put(pos, true);
-                    }
                 }
             }
 
