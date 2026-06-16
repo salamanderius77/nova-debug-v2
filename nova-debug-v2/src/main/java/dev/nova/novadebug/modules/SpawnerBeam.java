@@ -13,7 +13,6 @@ import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
-import dev.nova.novadebug.SaintToast;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,7 +27,6 @@ public class SpawnerBeam extends Module {
     private final Setting<SettingColor> spawnerFill = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
     private final Setting<SettingColor> spawnerLine = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
     private final Setting<RenderStyle> spawnerStyle = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean> saintNotifier = sgSpawner.add(new BoolSetting.Builder().name("saint-notifier").description("Shows a HUD toast notification when a spawner is detected.").defaultValue(false).build());
     private final Setting<Boolean> spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
     private final Setting<Integer> alpha = sgSpawner.add(new IntSetting.Builder().name("alpha").defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
 
@@ -37,7 +35,6 @@ public class SpawnerBeam extends Module {
     private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder().name("clear-distance").defaultValue(20).min(0).sliderMax(32).build());
 
     private final ConcurrentHashMap<ChunkPos, BlockPos> trackedChunks = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<ChunkPos, Boolean> notifiedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> scannedChunks = new ConcurrentHashMap<>();
     private final List<ChunkPos> scanQueue = new ArrayList<>();
     private int scanIndex = 0;
@@ -51,7 +48,7 @@ public class SpawnerBeam extends Module {
 
     @Override
     public void onActivate() {
-        trackedChunks.clear(); notifiedChunks.clear(); scannedChunks.clear();
+        trackedChunks.clear(); scannedChunks.clear();
         scanQueue.clear(); scanIndex = 0; scanDone = false;
         scanOriginChunk = null; renderSnapshot = Collections.emptyMap();
         buildScanQueue();
@@ -59,8 +56,7 @@ public class SpawnerBeam extends Module {
 
     @Override
     public void onDeactivate() {
-        trackedChunks.clear(); notifiedChunks.clear(); scannedChunks.clear();
-        scanQueue.clear(); renderSnapshot = Collections.emptyMap();
+        trackedChunks.clear(); scannedChunks.clear();
         scanDone = false;
     }
 
@@ -78,17 +74,23 @@ public class SpawnerBeam extends Module {
 
     private void scanChunk(ChunkPos pos) {
         if (scannedChunks.containsKey(pos)) return;
+        if (!mc.world.isChunkLoaded(pos.x, pos.z)) {
+            // Not loaded yet (e.g. far from spawn or outside render distance) - skip for now,
+            // it will be retried since we don't mark it scanned.
+            scanQueue.add(pos);
+            return;
+        }
         WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
+        if (chunk == null) {
+            scanQueue.add(pos);
+            return;
+        }
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 for (int y = -64; y < 320; y++) {  // full height
                     BlockPos bp = new BlockPos(pos.getStartX() + x, y, pos.getStartZ() + z);
                     if (chunk.getBlockState(bp).getBlock() == Blocks.SPAWNER) {
                         trackedChunks.put(pos, bp);
-                        if (saintNotifier.get() && !notifiedChunks.containsKey(pos)) {
-                            SaintToast.get().show("Spawner Beam Found!", "X: " + bp.getX() + " Y: " + bp.getY() + " Z: " + bp.getZ());
-                            notifiedChunks.put(pos, true);
-                        }
                         return;
                     }
                 }
