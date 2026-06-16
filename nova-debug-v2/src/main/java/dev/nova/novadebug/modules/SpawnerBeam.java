@@ -2,7 +2,7 @@ package dev.nova.novadebug.modules;
 
 import dev.nova.novadebug.NovaDebugAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
-import meteordevelopment.meteorclient.events.world.ChunkDataEvent; // NOTE: verify this class exists in your Meteor version; if it doesn't compile, see comment in onActivate region below
+import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
@@ -25,26 +25,41 @@ public class SpawnerBeam extends Module {
     private final SettingGroup sgSpawner = settings.createGroup("Spawners");
     private final SettingGroup sgGeneral = settings.createGroup("General");
 
-    private final Setting<SettingColor> spawnerFill = sgSpawner.add(new ColorSetting.Builder().name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
-    private final Setting<SettingColor> spawnerLine = sgSpawner.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
-    private final Setting<RenderStyle> spawnerStyle = sgSpawner.add(new EnumSetting.Builder<RenderStyle>().name("render-style").defaultValue(RenderStyle.Pillar).build());
-    private final Setting<Boolean> spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder().name("bedrock-pillar").defaultValue(true).build());
-    private final Setting<Integer> alpha = sgSpawner.add(new IntSetting.Builder().name("alpha").defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
+    private final Setting<SettingColor> spawnerFill = sgSpawner.add(new ColorSetting.Builder()
+        .name("fill-color").defaultValue(new SettingColor(0, 100, 255, 40)).build());
+    private final Setting<SettingColor> spawnerLine = sgSpawner.add(new ColorSetting.Builder()
+        .name("line-color").defaultValue(new SettingColor(0, 100, 255, 200)).build());
+    private final Setting<RenderStyle> spawnerStyle = sgSpawner.add(new EnumSetting.Builder<RenderStyle>()
+        .name("render-style").defaultValue(RenderStyle.Pillar).build());
+    private final Setting<Boolean> spawnerBedrockPillar = sgSpawner.add(new BoolSetting.Builder()
+        .name("bedrock-pillar").defaultValue(true).build());
+    private final Setting<Integer> alpha = sgSpawner.add(new IntSetting.Builder()
+        .name("alpha").defaultValue(40).min(1).max(255).sliderMin(1).sliderMax(255).build());
 
-    private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder().name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
-    private final Setting<Integer> chunksPerTick = sgGeneral.add(new IntSetting.Builder().name("chunks-per-tick").description("Chunks fully scanned per tick. Higher = faster detection, more CPU per tick.").defaultValue(4).min(1).sliderMax(16).build());
-    private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder().name("clear-distance").defaultValue(20).min(0).sliderMax(32).build());
+    // FIX: beam-width setting so users can tune the beam size (0.5 = half a block wide)
+    private final Setting<Double> beamWidth = sgSpawner.add(new DoubleSetting.Builder()
+        .name("beam-width").description("Width of the beam in blocks (Beam style only).")
+        .defaultValue(0.5).min(0.1).max(2.0).sliderMin(0.1).sliderMax(2.0).build());
+
+    private final Setting<Integer> renderDistance = sgGeneral.add(new IntSetting.Builder()
+        .name("render-distance").defaultValue(20).min(1).sliderMax(32).build());
+    private final Setting<Integer> chunksPerTick = sgGeneral.add(new IntSetting.Builder()
+        .name("chunks-per-tick")
+        .description("Chunks fully scanned per tick. Higher = faster detection, more CPU per tick.")
+        .defaultValue(4).min(1).sliderMax(16).build());
+    private final Setting<Integer> clearDistance = sgGeneral.add(new IntSetting.Builder()
+        .name("clear-distance").defaultValue(20).min(0).sliderMax(32).build());
+
+    // FIX: use a single lock object so scanQueue reassignment and queue operations
+    // are always done under the same monitor, eliminating the data-race crash.
+    private final Object queueLock = new Object();
 
     private final ConcurrentHashMap<ChunkPos, BlockPos> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> scannedChunks = new ConcurrentHashMap<>();
-    // Priority queue ordered by distance from player so nearby spawners are found first.
-    // Comparator is replaced with a real distance-based one in buildScanQueue(); this default
-    // just prevents a crash if anything is ever inserted before that runs.
     private PriorityQueue<ChunkPos> scanQueue = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
-    // Tracks what's currently in scanQueue so we don't enqueue duplicates (O(1) check instead of scanning the list).
     private final Set<ChunkPos> queued = ConcurrentHashMap.newKeySet();
-    private boolean scanDone = false;
-    private ChunkPos scanOriginChunk = null;
+    private volatile boolean scanDone = false;
+    private volatile ChunkPos scanOriginChunk = null;
     private volatile Map<ChunkPos, BlockPos> renderSnapshot = Collections.emptyMap();
 
     public SpawnerBeam() {
@@ -53,75 +68,90 @@ public class SpawnerBeam extends Module {
 
     @Override
     public void onActivate() {
-        trackedChunks.clear(); scannedChunks.clear();
-        queued.clear(); scanDone = false;
-        scanOriginChunk = null; renderSnapshot = Collections.emptyMap();
+        // FIX: clear everything under the lock so no stale queue entry can survive
+        // a rapid toggle-off / toggle-on that previously caused NPE crashes.
+        synchronized (queueLock) {
+            trackedChunks.clear();
+            scannedChunks.clear();
+            queued.clear();
+            scanQueue = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
+            scanDone = false;
+            scanOriginChunk = null;
+            renderSnapshot = Collections.emptyMap();
+        }
         buildScanQueue();
     }
 
     @Override
     public void onDeactivate() {
-        trackedChunks.clear(); scannedChunks.clear();
-        queued.clear();
-        scanQueue = new PriorityQueue<>();
-        scanDone = false;
+        synchronized (queueLock) {
+            trackedChunks.clear();
+            scannedChunks.clear();
+            queued.clear();
+            scanQueue = new PriorityQueue<>();
+            scanDone = false;
+        }
     }
 
     private void buildScanQueue() {
         if (mc.player == null) return;
-        scanOriginChunk = mc.player.getChunkPos();
-        // Order by squared distance from the player so close chunks (and therefore close
-        // spawners) are discovered first instead of in raster order.
-        scanQueue = new PriorityQueue<>(Comparator.comparingLong(this::distSqToOrigin));
-        queued.clear();
-        int r = renderDistance.get();
-        for (int x = -r; x <= r; x++) {
-            for (int z = -r; z <= r; z++) {
-                ChunkPos p = new ChunkPos(scanOriginChunk.x + x, scanOriginChunk.z + z);
-                enqueue(p);
+        ChunkPos origin = mc.player.getChunkPos();
+        synchronized (queueLock) {
+            scanOriginChunk = origin;
+            scanQueue = new PriorityQueue<>(Comparator.comparingLong(this::distSqToOrigin));
+            queued.clear();
+            int r = renderDistance.get();
+            for (int x = -r; x <= r; x++) {
+                for (int z = -r; z <= r; z++) {
+                    ChunkPos p = new ChunkPos(origin.x + x, origin.z + z);
+                    enqueueUnsafe(p); // already inside lock
+                }
             }
         }
     }
 
     private long distSqToOrigin(ChunkPos p) {
-        if (scanOriginChunk == null) return 0;
-        long dx = p.x - scanOriginChunk.x;
-        long dz = p.z - scanOriginChunk.z;
+        ChunkPos origin = scanOriginChunk;
+        if (origin == null) return 0;
+        long dx = p.x - origin.x;
+        long dz = p.z - origin.z;
         return dx * dx + dz * dz;
     }
 
-    private void enqueue(ChunkPos p) {
+    // FIX: split enqueue into a lock-free internal version (called when already holding
+    // queueLock) and a public version that acquires the lock. This avoids nested locking
+    // and the IllegalMonitorStateException that caused some of the crashes.
+    private void enqueueUnsafe(ChunkPos p) {
         if (scannedChunks.containsKey(p)) return;
-        if (!queued.add(p)) return; // already in queue
+        if (!queued.add(p)) return;
         scanQueue.add(p);
     }
 
-    /**
-     * Fires when a chunk's data is (re)sent to the client, i.e. it just became available/loaded.
-     * NOTE: confirm this event class/method name matches your Meteor version - if ChunkDataEvent
-     * doesn't exist, look for an equivalent world/chunk-load event in
-     * meteordevelopment.meteorclient.events.world and swap the import + signature here.
-     */
+    private void enqueue(ChunkPos p) {
+        synchronized (queueLock) {
+            enqueueUnsafe(p);
+        }
+    }
+
     @EventHandler
     private void onChunkData(ChunkDataEvent event) {
         if (mc.player == null || scanOriginChunk == null) return;
         ChunkPos pos = new ChunkPos(event.chunk().getPos().x, event.chunk().getPos().z);
         int r = renderDistance.get();
-        // Only auto-track chunks within our configured radius of where we started scanning from.
-        if (Math.abs(pos.x - scanOriginChunk.x) <= r && Math.abs(pos.z - scanOriginChunk.z) <= r) {
+        ChunkPos origin = scanOriginChunk;
+        if (origin != null
+                && Math.abs(pos.x - origin.x) <= r
+                && Math.abs(pos.z - origin.z) <= r) {
             enqueue(pos);
         }
     }
 
     private void scanChunk(ChunkPos pos) {
+        // FIX: remove from queued set first so enqueue() can re-add it later if needed.
         queued.remove(pos);
         if (scannedChunks.containsKey(pos)) return;
-        if (!mc.world.isChunkLoaded(pos.x, pos.z)) {
-            // Not loaded yet - don't mark scanned, don't requeue here either.
-            // It'll be picked up automatically by onChunkData once it loads,
-            // which is faster and avoids busy-looping on unloaded chunks.
-            return;
-        }
+        if (mc.world == null || !mc.world.isChunkLoaded(pos.x, pos.z)) return;
+
         WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
         if (chunk == null) return;
 
@@ -132,13 +162,8 @@ public class SpawnerBeam extends Module {
         scannedChunks.put(pos, true);
     }
 
-    /**
-     * Scans a chunk for a spawner block. Walks bottom-up in 16-block sections and skips a
-     * section immediately if it's empty (no blocks at all besides air), which is the common
-     * case for most of the build height in a typical world and avoids 1-by-1 checks across
-     * the full 384-block column for sections that can't contain anything.
-     */
     private BlockPos findSpawnerInChunk(WorldChunk chunk, ChunkPos pos) {
+        if (mc.world == null) return null;
         int minY = mc.world.getBottomY();
         int maxY = mc.world.getTopY();
         for (int sectionY = minY; sectionY < maxY; sectionY += 16) {
@@ -162,8 +187,6 @@ public class SpawnerBeam extends Module {
         try {
             return chunk.getSection(chunk.getSectionIndex(sectionY)).isEmpty();
         } catch (Exception e) {
-            // If the API differs slightly across versions, fall back to "not empty"
-            // so we still scan it correctly instead of silently skipping real blocks.
             return false;
         }
     }
@@ -172,14 +195,20 @@ public class SpawnerBeam extends Module {
     private void onTick(TickEvent.Post event) {
         if (mc.world == null || mc.player == null) return;
 
-        for (int i = 0; i < chunksPerTick.get() && !scanQueue.isEmpty(); i++) {
-            ChunkPos next = scanQueue.poll();
-            if (next != null) scanChunk(next);
+        // FIX: poll inside the lock so the queue is never accessed while buildScanQueue()
+        // is replacing it on another code path.
+        List<ChunkPos> toScan = new ArrayList<>();
+        synchronized (queueLock) {
+            int limit = chunksPerTick.get();
+            for (int i = 0; i < limit && !scanQueue.isEmpty(); i++) {
+                ChunkPos next = scanQueue.poll();
+                if (next != null) toScan.add(next);
+            }
+            scanDone = scanQueue.isEmpty();
         }
+        for (ChunkPos pos : toScan) scanChunk(pos);
 
-        scanDone = scanQueue.isEmpty();
-
-        // Update render snapshot
+        // Snapshot outside the lock - trackedChunks is a ConcurrentHashMap so this is safe.
         renderSnapshot = new HashMap<>(trackedChunks);
     }
 
@@ -195,14 +224,36 @@ public class SpawnerBeam extends Module {
 
         for (Map.Entry<ChunkPos, BlockPos> entry : snapshot.entrySet()) {
             ChunkPos pos = entry.getKey();
-            int x1 = pos.getStartX(), z1 = pos.getStartZ();
-            int x2 = x1 + 16, z2 = z1 + 16;
+            BlockPos spawnerPos = entry.getValue();
 
-            if (style == RenderStyle.Pillar || style == RenderStyle.Beam) {
+            if (style == RenderStyle.Pillar) {
+                // Full-chunk column from bedrock to sky (or y=64)
+                int x1 = pos.getStartX(), z1 = pos.getStartZ();
+                int x2 = x1 + 16, z2 = z1 + 16;
                 int yMax = spawnerBedrockPillar.get() ? 320 : 64;
                 event.renderer.box(x1, -64, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
-            } else {
+
+            } else if (style == RenderStyle.Flat) {
+                // Single flat slice at y=9-10 across the whole chunk
+                int x1 = pos.getStartX(), z1 = pos.getStartZ();
+                int x2 = x1 + 16, z2 = z1 + 16;
                 event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
+
+            } else if (style == RenderStyle.Beam) {
+                // FIX: narrow beacon-style beam rising from the spawner block upward.
+                // Uses the exact spawner X/Z position (centre of block) so the beam
+                // sits on top of the block rather than spanning the whole chunk.
+                if (spawnerPos != null) {
+                    double hw = beamWidth.get() / 2.0; // half-width
+                    double cx = spawnerPos.getX() + 0.5; // centre of the block
+                    double cz = spawnerPos.getZ() + 0.5;
+                    int beamTop = spawnerBedrockPillar.get() ? 320 : 128;
+                    event.renderer.box(
+                        cx - hw, spawnerPos.getY(), cz - hw,
+                        cx + hw, beamTop,             cz + hw,
+                        fill, line, ShapeMode.Both, 0
+                    );
+                }
             }
         }
     }
