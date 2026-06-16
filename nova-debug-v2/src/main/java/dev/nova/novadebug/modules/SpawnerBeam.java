@@ -10,11 +10,10 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
-import net.minecraft.client.toast.SystemToast;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
+import dev.nova.novadebug.SaintToast;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -87,9 +86,7 @@ public class SpawnerBeam extends Module {
                     if (chunk.getBlockState(bp).getBlock() == Blocks.SPAWNER) {
                         trackedChunks.put(pos, bp);
                         if (saintNotifier.get() && !notifiedChunks.containsKey(pos)) {
-                            SystemToast.add(mc.getToastManager(), SystemToast.Type.PERIODIC_NOTIFICATION,
-                                Text.literal("Spawner Found"),
-                                Text.literal("X: " + bp.getX() + " Y: " + bp.getY() + " Z: " + bp.getZ()));
+                            SaintToast.get().show("Spawner Beam Found!", "X: " + bp.getX() + " Y: " + bp.getY() + " Z: " + bp.getZ());
                             notifiedChunks.put(pos, true);
                         }
                         return;
