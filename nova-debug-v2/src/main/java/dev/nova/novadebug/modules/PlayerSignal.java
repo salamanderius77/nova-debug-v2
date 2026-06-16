@@ -9,10 +9,9 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.toast.SystemToast;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.ChunkPos;
+import dev.nova.novadebug.SaintToast;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -77,12 +76,7 @@ public class PlayerSignal extends Module {
                 if (!trackedChunks.containsKey(pos)) {
                     trackedChunks.put(pos, true);
                     if (saintNotifier.get() && !notifiedChunks.containsKey(pos)) {
-                        int bx = (int) Math.floor(p.getX());
-                        int by = (int) Math.floor(p.getY());
-                        int bz = (int) Math.floor(p.getZ());
-                        SystemToast.add(mc.getToastManager(), SystemToast.Type.PERIODIC_NOTIFICATION,
-                            Text.literal(p.getName().getString()),
-                            Text.literal("X: " + bx + " Y: " + by + " Z: " + bz));
+                        SaintToast.get().show("Player Found!", p.getName().getString());
                         notifiedChunks.put(pos, true);
                     }
                 }
