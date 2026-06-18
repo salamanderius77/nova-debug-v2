@@ -45,10 +45,13 @@ public class SpawnerBeam extends Module {
         .description("Chunks scanned per tick. Higher = faster but more CPU.")
         .defaultValue(4).min(1).sliderMax(16).build());
 
+    private final Setting<Boolean> deepslateBypass = sgGeneral.add(new BoolSetting.Builder()
+        .name("deepslate-bypass").description("Bypass 40 height limit - scan under deepslate").defaultValue(true).build());
+    private final Setting<Integer> extraYScan = sgGeneral.add(new IntSetting.Builder()
+        .name("extra-y-scan").description("Extra blocks deeper to scan").defaultValue(120).min(0).max(200).build());
+
     private final Object queueLock = new Object();
 
-    // KEY CHANGE: List<BlockPos> instead of BlockPos so a chunk with 4 spawners
-    // stores all 4 positions, not just the first one found.
     private final ConcurrentHashMap<ChunkPos, List<BlockPos>> trackedChunks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ChunkPos, Boolean> scannedChunks = new ConcurrentHashMap<>();
     private PriorityQueue<ChunkPos> scanQueue = new PriorityQueue<>(Comparator.comparingInt(p -> 0));
@@ -57,10 +60,8 @@ public class SpawnerBeam extends Module {
     private volatile Map<ChunkPos, List<BlockPos>> renderSnapshot = Collections.emptyMap();
 
     public SpawnerBeam() {
-        super(NovaDebugAddon.CATEGORY, "Spawner Beam", "Highlights chunks containing spawners.");
+        super(NovaDebugAddon.CATEGORY, "Spawner Beam", "Highlights spawners under deepslate");
     }
-
-    // ── lifecycle ────────────────────────────────────────────────────────────
 
     @Override
     public void onActivate() {
@@ -84,8 +85,6 @@ public class SpawnerBeam extends Module {
             scanQueue = new PriorityQueue<>();
         }
     }
-
-    // ── scan queue ───────────────────────────────────────────────────────────
 
     private void buildScanQueue() {
         if (mc.player == null) return;
@@ -114,8 +113,6 @@ public class SpawnerBeam extends Module {
         scanQueue.add(p);
     }
 
-    // ── chunk scanning ───────────────────────────────────────────────────────
-
     private void scanChunk(ChunkPos pos) {
         queued.remove(pos);
         if (scannedChunks.containsKey(pos)) return;
@@ -124,7 +121,6 @@ public class SpawnerBeam extends Module {
         WorldChunk chunk = mc.world.getChunk(pos.x, pos.z);
         if (chunk == null) return;
 
-        // KEY CHANGE: collect ALL spawners in the chunk, not just the first one.
         List<BlockPos> found = findAllSpawnersInChunk(chunk, pos);
         if (!found.isEmpty()) trackedChunks.put(pos, found);
         scannedChunks.put(pos, true);
@@ -133,17 +129,19 @@ public class SpawnerBeam extends Module {
     private List<BlockPos> findAllSpawnersInChunk(WorldChunk chunk, ChunkPos pos) {
         List<BlockPos> result = new ArrayList<>();
         if (mc.world == null) return result;
-        int minY = mc.world.getBottomY();
+
+        int minY = mc.world.getBottomY() - (deepslateBypass.get() ? extraYScan.get() : 0);
         int maxY = mc.world.getTopY();
+
         for (int sY = minY; sY < maxY; sY += 16) {
             if (isSectionEmpty(chunk, sY)) continue;
             int yEnd = Math.min(sY + 16, maxY);
             for (int x = 0; x < 16; x++)
                 for (int z = 0; z < 16; z++)
-                    for (int y = sY; y < yEnd; y++) {
+                    for (int y = Math.max(sY, minY); y < yEnd; y++) {
                         BlockPos bp = new BlockPos(pos.getStartX() + x, y, pos.getStartZ() + z);
                         if (chunk.getBlockState(bp).getBlock() == Blocks.SPAWNER)
-                            result.add(bp); // add every spawner, keep going
+                            result.add(bp);
                     }
         }
         return result;
@@ -153,8 +151,6 @@ public class SpawnerBeam extends Module {
         try { return chunk.getSection(chunk.getSectionIndex(sY)).isEmpty(); }
         catch (Exception e) { return false; }
     }
-
-    // ── events ───────────────────────────────────────────────────────────────
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
@@ -202,21 +198,17 @@ public class SpawnerBeam extends Module {
             if (spawners == null || spawners.isEmpty()) continue;
 
             if (style == RenderStyle.Pillar) {
-                // One pillar covering the whole chunk regardless of spawner count.
                 int x1 = pos.getStartX(), z1 = pos.getStartZ();
                 int x2 = x1 + 16,        z2 = z1 + 16;
                 int yMax = spawnerBedrockPillar.get() ? 320 : 64;
                 event.renderer.box(x1, -64, z1, x2, yMax, z2, fill, line, ShapeMode.Both, 0);
 
             } else if (style == RenderStyle.Flat) {
-                // One flat slice covering the whole chunk.
                 int x1 = pos.getStartX(), z1 = pos.getStartZ();
                 int x2 = x1 + 16,        z2 = z1 + 16;
                 event.renderer.box(x1, 9, z1, x2, 10, z2, fill, line, ShapeMode.Both, 0);
 
             } else { // Beam
-                // KEY CHANGE: one individual beam per spawner block.
-                // 4 spawners in one chunk = 4 separate beams.
                 double hw = beamWidth.get() / 2.0;
                 int beamTop = spawnerBedrockPillar.get() ? 320 : 128;
                 for (BlockPos spawnerPos : spawners) {
