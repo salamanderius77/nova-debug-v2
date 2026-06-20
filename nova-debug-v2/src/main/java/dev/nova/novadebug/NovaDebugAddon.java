@@ -1,7 +1,9 @@
 package dev.nova.novadebug;
 
-import dev.nova.novadebug.modules.SpawnerBeam;
+import dev.nova.novadebug.modules.AutoRelog;
 import dev.nova.novadebug.modules.PlayerSignal;
+import dev.nova.novadebug.modules.RenderMeta;
+import dev.nova.novadebug.modules.SpawnerBeam;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -15,6 +17,8 @@ public class NovaDebugAddon extends MeteorAddon {
     public void onInitialize() {
         Modules.get().add(new SpawnerBeam());
         Modules.get().add(new PlayerSignal());
+        Modules.get().add(new AutoRelog());
+        Modules.get().add(new RenderMeta());
     }
 
     @Override
